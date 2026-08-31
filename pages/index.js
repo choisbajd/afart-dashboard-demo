@@ -30,7 +30,7 @@ import { generateAppSignups, AFFILIATION_OPTIONS } from "../lib/mockData";
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
 
 export async function getStaticProps() {
-  const raw = loadRawRows();
+  const raw = await loadRawRows();
   // [date, premium, insurer, joinType, channel, dealerKey, dealerName, managerName, group, hasComparison, prospectToCompDays, compToJoinDays][]
   const packedRows = toClientRows(raw);
   const giftRows = toGiftRows(raw);
@@ -50,6 +50,9 @@ export async function getStaticProps() {
       managers,
       bounds: { min: dateMin, max: dateMax },
     },
+    // Snowflake 동기화(cron)가 Blob에 새 CSV를 올려두면, 이 주기마다 백그라운드에서
+    // 페이지를 다시 만들어 반영한다 (Blob 연동 전엔 로컬 CSV만 읽으므로 의미 없음).
+    revalidate: 1800,
   };
 }
 

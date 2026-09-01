@@ -17,6 +17,8 @@
 --   - "유입채널" = counsel_application.channel_path (DEALER_APP→딜러앱 / RENEWAL→갱신 / CS→CS / 그 외→기타)
 --   - "상담구분" = counsel_application.is_renewal (신규/갱신 여부의 정확한 소스 — channel_path는
 --     "유입 경로" 개념이라 갱신 여부와 100% 일치하지 않을 수 있음, is_renewal이 진짜 기준)
+--   - "딜러세부유형" = users.business_sub_type (IMPORTED: 수입 / DOMESTIC: 국산).
+--     신차딜러(NEW_CAR_DEALER)를 배치도 기준 G1(수입)/G2(국산)로 나누는 데 씀 — lib/groups.js 참고.
 --   - "가입유형" = counsel_application.subscription_type (원본 값 그대로 사용)
 --   - "가입보험사" = counsel_application.join_insurer_code를 한글명으로 CASE 매핑
 --   - "체결일자"(=매출인식일) = 상태이력에 지급대기(ACCUMULATE_PENDING) 로그가 한 번이라도
@@ -75,6 +77,7 @@ masked AS (
     u.user_name                                                        AS dealer_name_raw,
     u.phone                                                            AS dealer_phone_raw,
     u.business_type,
+    u.business_sub_type,
     u.business_card_status,
     u.manager_id                                                       AS dealer_manager_id,
     u.sales_channel_id
@@ -151,7 +154,8 @@ SELECT
   m.business_card_status                                               AS "딜러상태",
   cm.name                                                               AS "상담(체결)매니저",
   dm.name                                                               AS "딜러전담매니저",
-  CASE WHEN m.is_renewal THEN '갱신' ELSE '신규' END                    AS "상담구분"
+  CASE WHEN m.is_renewal THEN '갱신' ELSE '신규' END                    AS "상담구분",
+  m.business_sub_type                                                  AS "딜러세부유형"
 FROM masked m
 JOIN status_agg sa        ON sa.counsel_id = m.counsel_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id

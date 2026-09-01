@@ -606,9 +606,19 @@ export default function Home({
                   <tr key={row.insurer}>
                     <td>{row.insurer}</td>
                     {agg.insurerPivot.types.map((t) => (
-                      <td key={t}>{formatWon(row.byType[t])}</td>
+                      <td key={t}>
+                        {formatWon(row.byType[t])}
+                        <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>
+                          {formatCount(row.byTypeCount[t])}건
+                        </span>
+                      </td>
                     ))}
-                    <td style={{ fontWeight: 600 }}>{formatWon(row.total)}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {formatWon(row.total)}
+                      <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)", fontWeight: 400 }}>
+                        {formatCount(row.totalCount)}건
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -616,9 +626,19 @@ export default function Home({
                 <tr>
                   <td>합계</td>
                   {agg.insurerPivot.types.map((t) => (
-                    <td key={t}>{formatWon(agg.insurerPivot.typeTotals[t])}</td>
+                    <td key={t}>
+                      {formatWon(agg.insurerPivot.typeTotals[t])}
+                      <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>
+                        {formatCount(agg.insurerPivot.typeCountTotals[t])}건
+                      </span>
+                    </td>
                   ))}
-                  <td>{formatWon(agg.insurerPivot.grandTotal)}</td>
+                  <td>
+                    {formatWon(agg.insurerPivot.grandTotal)}
+                    <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>
+                      {formatCount(agg.insurerPivot.grandCount)}건
+                    </span>
+                  </td>
                 </tr>
               </tfoot>
             </table>

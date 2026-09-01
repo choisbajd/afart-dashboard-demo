@@ -385,28 +385,6 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>앱 가입현황</h2>
-            <MockBadge />
-          </div>
-          <p className="section-note">raw 데이터엔 앱 회원가입 로그가 없어 선택한 기간 길이에 맞춰 생성한 샘플 추이입니다.</p>
-          <div className="card">
-            <div style={{ marginBottom: 10, fontSize: 13, color: "var(--ink-muted)" }}>
-              선택 기간 신규가입 <b style={{ color: "var(--ink)" }}>{formatCount(appSignupTotal)}</b>
-            </div>
-            <PeriodChart
-              mode="count"
-              valueLabel="앱 가입 건수"
-              data={appSignups.map((d) => ({
-                label: formatDateLabel(d.date),
-                premiumSum: d.count,
-                count: d.count,
-              }))}
-            />
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
             <h2>기간별 실적{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <p className="section-note">
@@ -583,6 +561,28 @@ export default function Home({
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <h2>앱 가입현황</h2>
+            <MockBadge />
+          </div>
+          <p className="section-note">raw 데이터엔 앱 회원가입 로그가 없어 선택한 기간 길이에 맞춰 생성한 샘플 추이입니다.</p>
+          <div className="card">
+            <div style={{ marginBottom: 10, fontSize: 13, color: "var(--ink-muted)" }}>
+              선택 기간 신규가입 <b style={{ color: "var(--ink)" }}>{formatCount(appSignupTotal)}</b>
+            </div>
+            <PeriodChart
+              mode="count"
+              valueLabel="앱 가입 건수"
+              data={appSignups.map((d) => ({
+                label: formatDateLabel(d.date),
+                premiumSum: d.count,
+                count: d.count,
+              }))}
+            />
           </div>
         </section>
 

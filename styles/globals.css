@@ -424,6 +424,11 @@ table.data tfoot td:first-child {
   color: var(--good);
   border-color: var(--good);
 }
+.chip.renewal {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
 
 .scope-out {
   margin-top: 40px;

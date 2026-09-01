@@ -15,11 +15,17 @@
 --
 -- 확인 완료된 매핑:
 --   - "유입채널" = counsel_application.channel_path (DEALER_APP→딜러앱 / RENEWAL→갱신 / CS→CS / 그 외→기타)
+--   - "상담구분" = counsel_application.is_renewal (신규/갱신 여부의 정확한 소스 — channel_path는
+--     "유입 경로" 개념이라 갱신 여부와 100% 일치하지 않을 수 있음, is_renewal이 진짜 기준)
 --   - "가입유형" = counsel_application.subscription_type (원본 값 그대로 사용)
 --   - "가입보험사" = counsel_application.join_insurer_code를 한글명으로 CASE 매핑
---   - "체결일자" = 현재 상태가 지급대기(ACCUMULATE_PENDING)면 상태이력에서 최초로
---     그 상태에 도달한 시각, 가입완료(JOIN_COMPLETED)면 counsel_application.join_completed_at,
---     가입취소(JOIN_CANCELLED)면 join_completed_at(성사 이력 없이 취소된 건은 NULL)
+--   - "체결일자"(=매출인식일) = 상태이력에 지급대기(ACCUMULATE_PENDING) 로그가 한 번이라도
+--     있으면 "현재 상태와 무관하게" 최초로 그 상태에 도달한 시각(pending_at)을 쓴다.
+--     지급대기 로그가 아예 없는 건(=지급대기 없이 바로 가입완료)만 join_completed_at을 쓴다.
+--     주의: 갱신 건은 비교견적~지급대기 사이 간격이 몇 주~몇 달까지 벌어지는 경우가 흔해서
+--     (사전예약 등), 이 로직을 "현재상태 = ACCUMULATE_PENDING일 때만 pending_at" 식으로
+--     잘못 짜면 나중에 가입완료로 바뀌는 순간 매출이 엉뚱한 날짜(가입완료 처리일)로
+--     다시 잡혀서 이중집계가 난다. pending_at 유무만으로 판단해야 한다.
 --
 -- 대시보드 "가입취소 리스트"용으로 counsel_status = 'JOIN_CANCELLED'인 건도 함께 내려받습니다.
 -- 체결(지급대기·가입완료) 집계에는 이 건들이 섞이지 않는데, 대시보드가 "체결일자"가 비어있는
@@ -49,6 +55,7 @@ masked AS (
     ca.customer_id,
     ca.user_id,
     ca.channel_path,
+    ca.is_renewal,
     ca.counsel_status,
     ca.subscription_type,
     ca.insurance_type,
@@ -121,7 +128,9 @@ SELECT
   m.insurance_type                                                     AS "보험종류",
   m.vehicle_usage_code                                                 AS "차량구분",
   TO_CHAR(
-    CASE WHEN m.counsel_status = 'ACCUMULATE_PENDING' THEN sa.pending_at
+    -- 지급대기 로그가 있으면(현재 상태가 뭐든) 그 최초 도달 시각을 매출인식일로,
+    -- 없으면(지급대기 없이 바로 가입완료) 가입완료 시각을 쓴다.
+    CASE WHEN sa.pending_at IS NOT NULL THEN sa.pending_at
          ELSE m.join_completed_at
     END, 'YYYY-MM-DD'
   )                                                                     AS "체결일자",
@@ -141,7 +150,8 @@ SELECT
   m.business_type                                                      AS "딜러유형",
   m.business_card_status                                               AS "딜러상태",
   cm.name                                                               AS "상담(체결)매니저",
-  dm.name                                                               AS "딜러전담매니저"
+  dm.name                                                               AS "딜러전담매니저",
+  CASE WHEN m.is_renewal THEN '갱신' ELSE '신규' END                    AS "상담구분"
 FROM masked m
 JOIN status_agg sa        ON sa.counsel_id = m.counsel_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id

@@ -58,6 +58,7 @@ export default function SalesRawList({ initialFrom, initialTo, bounds }) {
         <table className="data">
           <thead>
             <tr>
+              <th>상담구분</th>
               <th>유입채널</th>
               <th>고객명</th>
               <th>차량(차대)번호</th>
@@ -72,7 +73,7 @@ export default function SalesRawList({ initialFrom, initialTo, bounds }) {
           <tbody>
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                <td colSpan={10} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
                   해당 기간에 데이터가 없습니다.
                 </td>
               </tr>
@@ -81,6 +82,9 @@ export default function SalesRawList({ initialFrom, initialTo, bounds }) {
               const mismatch = r.counselManagerName !== r.dealerManagerName;
               return (
                 <tr key={i}>
+                  <td>
+                    <span className={`chip ${r.consultType === "갱신" ? "renewal" : "new"}`}>{r.consultType}</span>
+                  </td>
                   <td>{r.channel}</td>
                   <td style={{ textAlign: "left" }}>{r.customerName}</td>
                   <td>{r.vin || "-"}</td>

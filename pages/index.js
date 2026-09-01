@@ -15,17 +15,13 @@ import {
   formatWon,
   formatCompactWon,
   formatCount,
-  formatPercent,
   formatDateLabel,
 } from "../lib/format";
 import PeriodChart from "../components/PeriodChart";
 import FilterBar from "../components/FilterBar";
-import TargetPanel from "../components/TargetPanel";
-import IncentivePanel from "../components/IncentivePanel";
 import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
 import MonthTargetCard from "../components/MonthTargetCard";
-import { GROUPS } from "../lib/groups";
 import { generateAppSignups, AFFILIATION_OPTIONS } from "../lib/mockData";
 
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
@@ -137,7 +133,6 @@ export default function Home({
   // 관리자는 매니저를 바꿔가며 각자의 목표를 설정할 수 있고, 센터상담사는 항상 읽기 전용이다.
   const [viewerRole, setViewerRole] = useState("ADMIN");
   const isViewerAdmin = viewerRole === "ADMIN";
-  const [dealerSort, setDealerSort] = useState("premiumSum");
   const [giftShipDate, setGiftShipDate] = useState("");
   const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
 
@@ -206,20 +201,8 @@ export default function Home({
     return { daily: build("daily"), weekly: build("weekly"), monthly: build("monthly") };
   }, [agg]);
 
-  const dealerTop = useMemo(() => {
-    return [...agg.dealerRank].sort((a, b) => b[dealerSort] - a[dealerSort]).slice(0, 15);
-  }, [agg, dealerSort]);
-  const dealerRest = agg.dealerRank.length - dealerTop.length;
-  const dealerRestSum = agg.dealerRank.slice(15).reduce((s, d) => s + d.premiumSum, 0);
-  const dealerRestCount = agg.dealerRank.slice(15).reduce((s, d) => s + d.count, 0);
-
   const appSignups = useMemo(() => generateAppSignups(dateFrom, dateTo), [dateFrom, dateTo]);
   const appSignupTotal = appSignups.reduce((s, d) => s + d.count, 0);
-
-  const groupRows = GROUPS.map((g) => ({
-    ...g,
-    dealerCount: agg.groupDealerCount.get(g.code)?.size || 0,
-  }));
 
   // 담당 딜러 수 — "딜러 전담 매니저"(users.manager_id) 기준. 상담을 처리한 매니저(managerName)와는
   // 다른 축이라 상단 기간 필터와 무관하게, 전체 = 배정 여부만(체결 이력 전체), 활동 = 오늘(bounds.max)로부터
@@ -584,59 +567,6 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>개인별 목표 매출 달성률</h2>
-          </div>
-          <TargetPanel
-            scopeKey={manager}
-            rangeKey={`${dateFrom}~${dateTo}`}
-            premiumSum={agg.totals.premiumSum}
-            defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
-          />
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>예상 인센티브</h2>
-            <MockBadge>샘플 요율</MockBadge>
-          </div>
-          <IncentivePanel premiumSum={agg.totals.premiumSum} />
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>비교견적 추적{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-          </div>
-          <p className="section-note">
-            상태전환이력을 파싱해 만든 실제 지표입니다. 다만 이 raw pull은 이미 성사된 건만 담고 있어, "비견 후 이탈"까지 포함한 진짜
-            전환율은 계산할 수 없습니다 — 아래 비율은 체결 건 중 비교견적 단계를 거친 비중입니다.
-          </p>
-          <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-            <div className="kpi-card">
-              <div className="label">비견 경유 체결 (전체 대비)</div>
-              <div className="value">
-                {formatCount(agg.funnel.comparisonCount)}
-                <span className="unit">{formatPercent(agg.funnel.comparisonRate)}</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">가망상담 → 비견 평균 소요일</div>
-              <div className="value">
-                {agg.funnel.avgProspectToCompDays != null ? agg.funnel.avgProspectToCompDays.toFixed(1) : "-"}
-                <span className="unit">일</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">비견 → 체결 평균 소요일</div>
-              <div className="value">
-                {agg.funnel.avgCompToJoinDays != null ? agg.funnel.avgCompToJoinDays.toFixed(1) : "-"}
-                <span className="unit">일</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
             <h2>가입 보험사 × 가입유형(CM/TM)별 원수보험료{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <div className="table-wrap">
@@ -671,113 +601,6 @@ export default function Home({
                 </tr>
               </tfoot>
             </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="grid-2">
-            <div>
-              <div className="section-head">
-                <h2>딜러별 실적 TOP 15</h2>
-                <div className="toggle-group">
-                  <button className={dealerSort === "premiumSum" ? "active" : ""} onClick={() => setDealerSort("premiumSum")}>
-                    보험료순
-                  </button>
-                  <button className={dealerSort === "count" ? "active" : ""} onClick={() => setDealerSort("count")}>
-                    건수순
-                  </button>
-                </div>
-              </div>
-              <div className="table-wrap">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>딜러</th>
-                      <th>딜러유형</th>
-                      <th>담당 매니저</th>
-                      <th>체결건수</th>
-                      <th>원수보험료</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dealerTop.map((d, i) => (
-                      <tr key={`${d.dealerName}-${i}`}>
-                        <td>
-                          <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{i + 1}</span>
-                          {d.dealerName}
-                        </td>
-                        <td>{GROUPS.find((g) => g.code === d.group)?.label ?? "-"}</td>
-                        <td>{d.managerName}</td>
-                        <td>{formatCount(d.count)}</td>
-                        <td>{formatWon(d.premiumSum)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {dealerRest > 0 && (
-                    <tfoot>
-                      <tr>
-                        <td>그 외 {dealerRest}명</td>
-                        <td>-</td>
-                        <td>-</td>
-                        <td>{formatCount(dealerRestCount)}</td>
-                        <td>{formatWon(dealerRestSum)}</td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-            </div>
-
-            <div>
-              <div className="section-head">
-                <h2>유입채널별 실적</h2>
-              </div>
-              <div className="table-wrap">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>채널</th>
-                      <th>체결건수</th>
-                      <th>원수보험료</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {agg.byChannel.map((c) => (
-                      <tr key={c.channel}>
-                        <td>{c.channel}</td>
-                        <td>{formatCount(c.count)}</td>
-                        <td>{formatWon(c.premiumSum)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="section-head" style={{ marginTop: 24 }}>
-                <h2>딜러유형별 배정 회원수{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-              </div>
-              <p className="section-note">
-                business_type 실제 데이터입니다. 신차딜러는 business_sub_type이 없어 수입/국산으로 나누지 못합니다.
-              </p>
-              <div className="table-wrap">
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>딜러유형</th>
-                      <th>배정 회원수</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {groupRows.map((g) => (
-                      <tr key={g.code}>
-                        <td>{g.label}</td>
-                        <td>{g.dealerCount.toLocaleString("ko-KR")}명</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -910,7 +733,7 @@ export default function Home({
                     <td>{r.managerName}</td>
                     <td>{r.phone}</td>
                     <td>{r.changedAt}</td>
-                    <td>{r.currentStatus}</td>
+                    <td>{r.currentStatus === "JOIN_COMPLETED" ? "가입완료" : r.currentStatus}</td>
                   </tr>
                 ))}
               </tbody>

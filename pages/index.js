@@ -36,7 +36,7 @@ export async function getStaticProps() {
   const packedRows = toClientRows(raw);
   const giftRows = toGiftRows(raw);
   const pendingRows = toPendingRows(raw);
-  const pendingCompletedRows = toPendingCompletedRows(raw);
+  const pendingCompletedRows = toPendingCompletedRows();
   const cancelledRows = toCancelledRows(raw);
   const renewalRows = toRenewalRows(raw);
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");

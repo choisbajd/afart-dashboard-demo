@@ -245,13 +245,13 @@ export default function Home({
     [cancelledRows, dateFrom, dateTo, manager]
   );
 
-  // 갱신 관리 — 오늘(bounds.max) 기준으로 만기가 정확히 renewalDaysAhead일 남은 건만 (가입완료 건 한정).
+  // 갱신 관리 — 오늘(bounds.max) 기준으로 만기가 renewalDaysAhead일 이내로 도래한 건만 (가입완료 건 한정), 가까운 순으로.
   const renewalUpcoming = useMemo(() => {
     return renewalRows
       .filter((r) => manager === "ALL" || r.managerName === manager)
       .map((r) => ({ ...r, daysLeft: daysUntilFull(r.dueDate, bounds.max) }))
-      .filter((r) => r.daysLeft === renewalDaysAhead)
-      .sort((a, b) => (a.customerName < b.customerName ? -1 : 1));
+      .filter((r) => r.daysLeft <= renewalDaysAhead)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [renewalRows, manager, bounds.max, renewalDaysAhead]);
   const pendingShown = pending.slice(0, 30);
   const pendingCompletedShown = pendingCompleted.slice(0, 30);
@@ -653,7 +653,7 @@ export default function Home({
             <h2>갱신 관리</h2>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13 }}>
-            <span style={{ color: "var(--ink-muted)" }}>만기</span>
+            <span style={{ color: "var(--ink-muted)" }}>만기 도래</span>
             <input
               type="number"
               min={0}
@@ -662,11 +662,9 @@ export default function Home({
               value={renewalDaysAhead}
               onChange={(e) => setRenewalDaysAhead(Math.max(0, Number(e.target.value) || 0))}
             />
-            <span style={{ color: "var(--ink-muted)" }}>일 전인 건만 표시 (오늘 = {bounds.max} 기준, 가입완료 건 한정, 기본값 45일)</span>
+            <span style={{ color: "var(--ink-muted)" }}>일 전부터 표시 (오늘 = {bounds.max} 기준, 가입완료 건 한정, 기본값 45일)</span>
           </div>
-          <p className="section-note">
-            만기일자가 오늘로부터 정확히 입력한 일수만큼 남은 가입완료 건만 보여줍니다.
-          </p>
+          <p className="section-note">만기일이 가까운 순으로 정렬됩니다. 이미 만기가 지난 건은 맨 위에 표시됩니다.</p>
           <div className={`table-wrap ${renewalUpcoming.length > 10 ? "table-scroll-sm" : ""}`}>
             <table className="data">
               <thead>

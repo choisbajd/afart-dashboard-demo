@@ -5,6 +5,7 @@ import {
   toClientRows,
   toGiftRows,
   toPendingRows,
+  toPendingCompletedRows,
   toCancelledRows,
   toRenewalRows,
 } from "../lib/data";
@@ -35,6 +36,7 @@ export async function getStaticProps() {
   const packedRows = toClientRows(raw);
   const giftRows = toGiftRows(raw);
   const pendingRows = toPendingRows(raw);
+  const pendingCompletedRows = toPendingCompletedRows(raw);
   const cancelledRows = toCancelledRows(raw);
   const renewalRows = toRenewalRows(raw);
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
@@ -45,6 +47,7 @@ export async function getStaticProps() {
       packedRows,
       giftRows,
       pendingRows,
+      pendingCompletedRows,
       cancelledRows,
       renewalRows,
       managers,
@@ -115,6 +118,7 @@ export default function Home({
   packedRows,
   giftRows,
   pendingRows,
+  pendingCompletedRows,
   cancelledRows,
   renewalRows,
   managers,
@@ -247,6 +251,10 @@ export default function Home({
     () => filterListRows(pendingRows, { dateFrom, dateTo, manager }),
     [pendingRows, dateFrom, dateTo, manager]
   );
+  const pendingCompleted = useMemo(
+    () => filterListRows(pendingCompletedRows, { dateFrom, dateTo, manager }),
+    [pendingCompletedRows, dateFrom, dateTo, manager]
+  );
   const cancelled = useMemo(
     () => filterListRows(cancelledRows, { dateFrom, dateTo, manager }),
     [cancelledRows, dateFrom, dateTo, manager]
@@ -261,6 +269,7 @@ export default function Home({
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [renewalRows, manager, bounds.max, renewalDaysAhead]);
   const pendingShown = pending.slice(0, 30);
+  const pendingCompletedShown = pendingCompleted.slice(0, 30);
   const topManagerPremium = aggAll.managerRank[0]?.premiumSum || 1;
 
   return (
@@ -858,6 +867,50 @@ export default function Home({
                     <td>{r.phone}</td>
                     <td>{formatWon(r.premium)}</td>
                     <td>{r.managerName}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <h2>'지급대기 → 가입완료' 전환 고객 리스트</h2>
+          </div>
+          <p className="section-note">
+            지급대기(ACCUMULATE_PENDING)로 잡았다가 가입완료로 처리된 실제 데이터입니다 (갱신 계약 등).
+            {pendingCompleted.length > 30 &&
+              ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pendingCompleted.length)}).`}
+          </p>
+          <div className="table-wrap table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>지급대기 일자</th>
+                  <th>고객명</th>
+                  <th>상담(체결)담당자</th>
+                  <th>고객 연락처</th>
+                  <th>상태 변경일</th>
+                  <th>현재 상담상태</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingCompletedShown.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 조건에 지급대기→가입완료 전환 건이 없습니다.
+                    </td>
+                  </tr>
+                )}
+                {pendingCompletedShown.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.pendingAt}</td>
+                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
+                    <td>{r.managerName}</td>
+                    <td>{r.phone}</td>
+                    <td>{r.changedAt}</td>
+                    <td>{r.currentStatus}</td>
                   </tr>
                 ))}
               </tbody>

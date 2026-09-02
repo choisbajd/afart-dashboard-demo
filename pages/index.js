@@ -22,6 +22,7 @@ import FilterBar from "../components/FilterBar";
 import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
 import MonthTargetCard from "../components/MonthTargetCard";
+import UploadPanel from "../components/UploadPanel";
 import { generateAppSignups, AFFILIATION_OPTIONS } from "../lib/mockData";
 
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
@@ -323,6 +324,8 @@ export default function Home({
       </div>
 
       <div className="page">
+        {isViewerAdmin && <UploadPanel />}
+
         <div className="page-head">
           <div>
             <h1>실적 대시보드</h1>

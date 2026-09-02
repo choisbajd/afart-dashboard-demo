@@ -32,6 +32,15 @@
 -- 대시보드 "가입취소 리스트"용으로 counsel_status = 'JOIN_CANCELLED'인 건도 함께 내려받습니다.
 -- 체결(지급대기·가입완료) 집계에는 이 건들이 섞이지 않는데, 대시보드가 "체결일자"가 비어있는
 -- 행은 체결 관련 집계(KPI·기간별 실적·매니저 랭킹)에서 자동으로 제외하기 때문입니다.
+--
+-- ★ 증분(최근 활동) 모드로 바뀜 — 매번 전체를 다시 뽑을 필요 없습니다.
+--   맨 아래 WHERE 절이 "최근 90일 안에 상태 로그가 한 번이라도 있었던 상담"만 걸러줍니다.
+--   생성일이 아니라 "최근 활동" 기준인 이유: 5월에 시작한 상담이 7월에야 지급대기→가입완료로
+--   넘어가는 경우가 실제로 있어서, 생성일 기준으로 자르면 이런 "오래됐지만 최근에 갱신된"
+--   건을 놓칩니다. 이 CSV를 그대로 Claude에게 주면, 기존 data/raw_query.csv를 통째로
+--   덮어쓰는 게 아니라 상담ID+차량번호+차대번호 기준으로 "병합"합니다(겹치는 건 갱신,
+--   나머지 과거 데이터는 그대로 유지) — scripts/merge_raw_query.js 참고.
+--   전체를 다시 뽑고 싶으면 맨 아래 WHERE 절을 주석 처리하면 됩니다.
 -- ============================================================================
 
 WITH status_agg AS (
@@ -42,6 +51,7 @@ WITH status_agg AS (
     csl.counsel_id,
     MIN(CASE WHEN csl.new_counsel_status = 'ACCUMULATE_PENDING'
              THEN csl.created_at END)                                   AS pending_at,
+    MAX(csl.created_at)                                                 AS last_activity_at,
     LISTAGG(
       csl.new_counsel_status || '(' || TO_CHAR(csl.created_at, 'MM-DD HH24:MI') || ')',
       ' → '
@@ -161,5 +171,7 @@ JOIN status_agg sa        ON sa.counsel_id = m.counsel_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER cm       ON cm.id = m.counsel_manager_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.MANAGER dm       ON dm.id = m.dealer_manager_id
+-- 증분 모드: 최근 90일 안에 상태 로그가 있었던 상담만. 전체 재추출하려면 이 줄을 주석 처리.
+WHERE sa.last_activity_at >= DATEADD('day', -90, CURRENT_DATE())
 ORDER BY
   CASE WHEN m.counsel_status = 'ACCUMULATE_PENDING' THEN sa.pending_at ELSE m.join_completed_at END DESC NULLS LAST;

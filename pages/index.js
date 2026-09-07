@@ -2,19 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import {
   loadRawRows,
+  loadCallRows,
   toClientRows,
   toGiftRows,
+  toJoinCompletedRows,
   toPendingRows,
   toPendingCompletedRows,
   toCancelledRows,
   toRenewalRows,
 } from "../lib/data";
 import { unpackRows } from "../lib/pack";
-import { aggregate, filterRows, filterGiftRows, filterListRows } from "../lib/aggregate";
+import { aggregate, aggregateManagerFunnel, filterRows, filterGiftRows, filterListRows } from "../lib/aggregate";
 import {
   formatWon,
   formatCompactWon,
   formatCount,
+  formatPercent,
   formatDateLabel,
 } from "../lib/format";
 import PeriodChart from "../components/PeriodChart";
@@ -32,10 +35,12 @@ export async function getStaticProps() {
   // [date, premium, insurer, joinType, channel, dealerKey, dealerName, managerName, group, hasComparison, prospectToCompDays, compToJoinDays][]
   const packedRows = toClientRows(raw);
   const giftRows = toGiftRows(raw);
+  const joinCompletedRows = toJoinCompletedRows(raw);
   const pendingRows = toPendingRows(raw);
   const pendingCompletedRows = toPendingCompletedRows();
   const cancelledRows = toCancelledRows(raw);
   const renewalRows = toRenewalRows(raw);
+  const callRows = loadCallRows();
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
   const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "");
   const managers = [...new Set(raw.map((r) => r.managerName).filter(Boolean))].sort();
@@ -43,10 +48,12 @@ export async function getStaticProps() {
     props: {
       packedRows,
       giftRows,
+      joinCompletedRows,
       pendingRows,
       pendingCompletedRows,
       cancelledRows,
       renewalRows,
+      callRows,
       managers,
       bounds: { min: dateMin, max: dateMax },
     },
@@ -114,10 +121,12 @@ const PERIOD_TABS = [
 export default function Home({
   packedRows,
   giftRows,
+  joinCompletedRows,
   pendingRows,
   pendingCompletedRows,
   cancelledRows,
   renewalRows,
+  callRows,
   managers,
   bounds,
 }) {
@@ -165,7 +174,6 @@ export default function Home({
   const scopeRows = useMemo(() => filterRows(rangeRows, { manager }), [rangeRows, manager]);
 
   const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
-  const aggAll = useMemo(() => aggregate(rangeRows), [rangeRows]);
 
   // 직전 동기간 비교용 — "이번달 1일" 기준점만 필요하다 (상단 날짜 필터와는 별개).
   const oneMonthStart = useMemo(() => monthsAgoStart(bounds.max, 1), [bounds.max]);
@@ -218,20 +226,13 @@ export default function Home({
     return { total, active };
   }, [rows, manager, activeSinceDate]);
 
-  const managerDealerCounts = useMemo(() => {
-    const map = new Map();
-    for (const r of rows) {
-      if (!map.has(r.dealerManagerName)) map.set(r.dealerManagerName, { total: new Set(), active: new Set() });
-      const entry = map.get(r.dealerManagerName);
-      entry.total.add(r.dealerKey);
-      if (r.date >= activeSinceDate) entry.active.add(r.dealerKey);
-    }
-    return map;
-  }, [rows, activeSinceDate]);
-
   const gift = useMemo(
     () => filterGiftRows(giftRows, { dateFrom, dateTo, manager }),
     [giftRows, dateFrom, dateTo, manager]
+  );
+  const joinCompleted = useMemo(
+    () => filterListRows(joinCompletedRows, { dateFrom, dateTo, manager }),
+    [joinCompletedRows, dateFrom, dateTo, manager]
   );
   const pending = useMemo(
     () => filterListRows(pendingRows, { dateFrom, dateTo, manager }),
@@ -255,9 +256,13 @@ export default function Home({
       .filter((r) => r.daysLeft >= 0 && r.daysLeft <= renewalDaysAhead)
       .sort((a, b) => a.daysLeft - b.daysLeft);
   }, [renewalRows, manager, bounds.max, renewalDaysAhead]);
+  const joinCompletedShown = joinCompleted.slice(0, 30);
   const pendingShown = pending.slice(0, 30);
   const pendingCompletedShown = pendingCompleted.slice(0, 30);
-  const topManagerPremium = aggAll.managerRank[0]?.premiumSum || 1;
+  const managerFunnel = useMemo(
+    () => aggregateManagerFunnel(callRows, rangeRows, { dateFrom, dateTo }),
+    [callRows, rangeRows, dateFrom, dateTo]
+  );
 
   return (
     <>
@@ -537,37 +542,78 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>매니저별 실적 랭킹</h2>
+            <h2>매니저별 체결 순위</h2>
           </div>
           <p className="section-note">
-            counsel_manager 기준 실제 데이터입니다. 선택한 기간의 전체 매니저를 비교하며, 필터에서 매니저를 고르면 해당 행이 강조됩니다.
+            "콜수"는 선택한 기간에 <b>새로 생성된 상담</b> 건수(생성월 코호트) 기준이고, 원수보험료는 선택한 기간에{" "}
+            <b>매출로 인식된(체결일 기준)</b> 건 기준이라 두 숫자의 기간 의미가 다릅니다 — 8월 콜이 9월에 체결돼도 "8월 콜의 체결"로 잡힙니다.
+            "매출" 컬럼은 계산식이 아직 확정되지 않아 항상 "-"로 표시됩니다.
           </p>
-          <div className="card">
-            {aggAll.managerRank.map((m, i) => {
-              const pct = Math.max(6, (m.premiumSum / topManagerPremium) * 100);
-              const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
-              return (
-                <div key={m.managerName} className={`rank-row ${m.managerName === manager ? "selected" : ""}`}>
-                  <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{medal || i + 1}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                      <span className="name">{m.managerName}</span>
-                      <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>
-                        배정 {managerDealerCounts.get(m.managerName)?.total.size || 0} · 활동{" "}
-                        {managerDealerCounts.get(m.managerName)?.active.size || 0} · {formatCount(m.count)} ·{" "}
-                        <b style={{ color: "var(--accent-ink)", fontSize: 13 }}>{formatWon(m.premiumSum)}</b>
-                      </span>
-                    </div>
-                    <div className="race-track">
-                      <div className="race-fill" style={{ width: `${pct}%` }} />
-                      <span className="race-runner" style={{ left: `${pct}%` }}>
-                        🏃💨
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          {!managerFunnel.hasCallData && (
+            <p className="section-note" style={{ color: "var(--warn)" }}>
+              ⚠ 콜(상담 생성) 데이터가 아직 연동되지 않았습니다 — 신규/갱신 콜수·체결률은 0으로 표시됩니다.
+              (scripts/snowflake_calls_export.sql 실행 결과를 data/calls.csv로 반영하면 채워집니다.)
+            </p>
+          )}
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th rowSpan={2}>매니저</th>
+                  <th colSpan={3}>신규</th>
+                  <th colSpan={3}>갱신</th>
+                  <th rowSpan={2}>원수보험료</th>
+                  <th rowSpan={2}>매출</th>
+                </tr>
+                <tr>
+                  <th>콜수</th>
+                  <th>체결건수</th>
+                  <th>체결률</th>
+                  <th>콜수</th>
+                  <th>체결건수</th>
+                  <th>체결률</th>
+                </tr>
+              </thead>
+              <tbody>
+                {managerFunnel.rows.map((m) => (
+                  <tr key={m.managerName} className={m.managerName === manager ? "selected" : ""}>
+                    <td style={{ textAlign: "left" }}>{m.managerName}</td>
+                    <td>{formatCount(m.newCalls)}</td>
+                    <td>{formatCount(m.newDeals)}</td>
+                    <td>{formatPercent(m.newRate)}</td>
+                    <td>{formatCount(m.renewalCalls)}</td>
+                    <td>{formatCount(m.renewalDeals)}</td>
+                    <td>{formatPercent(m.renewalRate)}</td>
+                    <td style={{ fontWeight: 600 }}>{formatWon(m.premiumSum)}</td>
+                    <td>-</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td style={{ textAlign: "left" }}>{managerFunnel.totals.managerName}</td>
+                  <td>{formatCount(managerFunnel.totals.newCalls)}</td>
+                  <td>{formatCount(managerFunnel.totals.newDeals)}</td>
+                  <td>{formatPercent(managerFunnel.totals.newRate)}</td>
+                  <td>{formatCount(managerFunnel.totals.renewalCalls)}</td>
+                  <td>{formatCount(managerFunnel.totals.renewalDeals)}</td>
+                  <td>{formatPercent(managerFunnel.totals.renewalRate)}</td>
+                  <td style={{ fontWeight: 600 }}>{formatWon(managerFunnel.totals.premiumSum)}</td>
+                  <td>-</td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: "left", color: "var(--ink-muted)" }}>{managerFunnel.average.managerName}</td>
+                  <td>{formatCount(Math.round(managerFunnel.average.newCalls))}</td>
+                  <td>{formatCount(Math.round(managerFunnel.average.newDeals))}</td>
+                  <td>{formatPercent(managerFunnel.average.newRate)}</td>
+                  <td>{formatCount(Math.round(managerFunnel.average.renewalCalls))}</td>
+                  <td>{formatCount(Math.round(managerFunnel.average.renewalDeals))}</td>
+                  <td>{formatPercent(managerFunnel.average.renewalRate)}</td>
+                  <td>{formatWon(Math.round(managerFunnel.average.premiumSum))}</td>
+                  <td>-</td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </section>
 
@@ -706,38 +752,110 @@ export default function Home({
 
         <section className="section">
           <div className="section-head">
-            <h2>'지급대기' 전환 고객 리스트</h2>
+            <h2>가입완료 리스트</h2>
           </div>
           <p className="section-note">
-            현재상태 = ACCUMULATE_PENDING 실제 데이터입니다.
+            현재상태 = JOIN_COMPLETED 실제 데이터입니다.
+            {joinCompleted.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(joinCompleted.length)}).`}
+          </p>
+          <div className="table-wrap table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>체결일자</th>
+                  <th>영업채널</th>
+                  <th>고객명</th>
+                  <th>연락처</th>
+                  <th>차량(차대)번호</th>
+                  <th>새보험만기일</th>
+                  <th>보험료</th>
+                  <th>가입보험사</th>
+                  <th>가입유형</th>
+                  <th>상담매니저</th>
+                  <th>유치회원명</th>
+                  <th>유치회원ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {joinCompletedShown.length === 0 && (
+                  <tr>
+                    <td colSpan={12} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 조건에 가입완료 건이 없습니다.
+                    </td>
+                  </tr>
+                )}
+                {joinCompletedShown.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.contractDate}</td>
+                    <td>{r.channel}</td>
+                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
+                    <td>{r.phone}</td>
+                    <td>{r.vin}</td>
+                    <td>{r.expiryDate || "-"}</td>
+                    <td>{formatWon(r.premium)}</td>
+                    <td>{r.insurer}</td>
+                    <td>{r.joinType}</td>
+                    <td>{r.managerName}</td>
+                    <td style={{ textAlign: "left" }}>{r.dealerName}</td>
+                    <td>{r.dealerId || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
+            <h2>지급대기 리스트</h2>
+          </div>
+          <p className="section-note">
+            현재상태 = ACCUMULATE_PENDING 실제 데이터입니다. "갱신 광고비 적립 요율"은 실제 요율 데이터 소스가 아직 확인되지 않아 항상{" "}
+            "-"로 표시됩니다.
             {pending.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pending.length)}).`}
           </p>
           <div className="table-wrap table-scroll">
             <table className="data">
               <thead>
                 <tr>
-                  <th>전환일시</th>
+                  <th>체결일자</th>
+                  <th>영업채널</th>
                   <th>고객명</th>
                   <th>연락처</th>
+                  <th>차량(차대)번호</th>
+                  <th>새보험만기일</th>
                   <th>보험료</th>
-                  <th>매니저</th>
+                  <th>가입보험사</th>
+                  <th>가입유형</th>
+                  <th>상담매니저</th>
+                  <th>유치회원명</th>
+                  <th>유치회원ID</th>
+                  <th>갱신 광고비 적립 요율</th>
                 </tr>
               </thead>
               <tbody>
                 {pendingShown.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                    <td colSpan={13} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
                       해당 조건에 지급대기 건이 없습니다.
                     </td>
                   </tr>
                 )}
                 {pendingShown.map((r, i) => (
                   <tr key={i}>
-                    <td>{r.transitionAt}</td>
+                    <td>{r.contractDate}</td>
+                    <td>{r.channel}</td>
                     <td style={{ textAlign: "left" }}>{r.customerName}</td>
                     <td>{r.phone}</td>
+                    <td>{r.vin}</td>
+                    <td>{r.expiryDate || "-"}</td>
                     <td>{formatWon(r.premium)}</td>
+                    <td>{r.insurer}</td>
+                    <td>{r.joinType}</td>
                     <td>{r.managerName}</td>
+                    <td style={{ textAlign: "left" }}>{r.dealerName}</td>
+                    <td>{r.dealerId || "-"}</td>
+                    <td>{r.adRate == null ? "-" : formatPercent(r.adRate)}</td>
                   </tr>
                 ))}
               </tbody>

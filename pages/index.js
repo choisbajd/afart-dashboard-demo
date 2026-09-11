@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 import Head from "next/head";
+import { getServerSession } from "next-auth/next";
+import { signOut } from "next-auth/react";
+import { authOptions } from "../lib/authOptions";
 import {
   loadRawRows,
   loadCallRows,
@@ -30,7 +33,12 @@ const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목�
 // 방문마다 새로 실행된다(getServerSideProps) — loadRawRows()가 매번 Snowflake를 직접 조회하므로
 // 화면은 항상 그 시점 최신 데이터를 보여준다. Snowflake 조회가 실패하면 lib/data.js가 자동으로
 // Blob 스냅샷 → 로컬 CSV 순으로 폴백한다.
-export async function getServerSideProps() {
+export async function getServerSideProps(context) {
+  const session = await getServerSession(context.req, context.res, authOptions);
+  if (!session) {
+    return { redirect: { destination: "/login", permanent: false } };
+  }
+
   const raw = await loadRawRows();
   // [date, premium, insurer, joinType, channel, dealerKey, dealerName, managerName, group, hasComparison, prospectToCompDays, compToJoinDays][]
   const packedRows = toClientRows(raw);
@@ -255,6 +263,22 @@ export default function Home({
         <nav>
           <a className="active">실적 대시보드</a>
         </nav>
+        <button
+          type="button"
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          style={{
+            marginLeft: "auto",
+            background: "transparent",
+            border: "1px solid var(--border-strong)",
+            borderRadius: 6,
+            padding: "6px 12px",
+            fontSize: 13,
+            color: "var(--ink-muted)",
+            cursor: "pointer",
+          }}
+        >
+          로그아웃
+        </button>
       </div>
 
       <FilterBar

@@ -26,6 +26,14 @@ export default async function handler(req, res) {
     const { columns, rows } = await runSalesExportQuery();
     const csv = rowsToCsv(columns, rows);
     const url = await uploadSalesCsv(csv);
+
+    // 다음 ISR 주기(30분)를 기다리지 않고 바로 반영 (업로드 API와 동일한 패턴).
+    try {
+      await res.revalidate("/");
+    } catch (revalidateErr) {
+      console.error("즉시 재생성 실패(다음 자동 주기에 반영됨):", revalidateErr.message);
+    }
+
     return res.status(200).json({
       ok: true,
       rows: rows.length,

@@ -3,32 +3,18 @@ import Head from "next/head";
 import { getServerSession } from "next-auth/next";
 import { signOut } from "next-auth/react";
 import { authOptions } from "../lib/authOptions";
-import {
-  loadRawRows,
-  loadCallRows,
-  toClientRows,
-  toGiftRows,
-  toJoinCompletedRows,
-  toPendingRows,
-  toPendingCompletedRows,
-  toCancelledRows,
-  toRenewalRows,
-} from "../lib/data";
+import { loadRawRows, loadCallRows, toClientRows } from "../lib/data";
 import { unpackRows } from "../lib/pack";
-import { aggregate, aggregateManagerFunnel, filterRows, filterGiftRows, filterListRows } from "../lib/aggregate";
 import {
-  formatWon,
-  formatCompactWon,
-  formatCount,
-  formatPercent,
-  formatDateLabel,
-} from "../lib/format";
-import PeriodChart from "../components/PeriodChart";
+  aggregateContractSummary,
+  aggregateDailyByChannel,
+  aggregateMembers,
+  REVENUE_RATE,
+} from "../lib/aggregate";
+import { formatWon, formatCompactWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
+import { GROUPS } from "../lib/groups";
 import FilterBar from "../components/FilterBar";
-import SalesRawList from "../components/SalesRawList";
-import MonthTargetCard from "../components/MonthTargetCard";
-
-const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
+import ChannelStackedChart, { CHANNEL_PALETTE } from "../components/ChannelStackedChart";
 
 // 방문마다 새로 실행된다(getServerSideProps) — loadRawRows()가 매번 Snowflake를 직접 조회하므로
 // 화면은 항상 그 시점 최신 데이터를 보여준다. Snowflake 조회가 실패하면 lib/data.js가 자동으로
@@ -40,14 +26,7 @@ export async function getServerSideProps(context) {
   }
 
   const raw = await loadRawRows();
-  // [date, premium, insurer, joinType, channel, dealerKey, dealerName, managerName, group, hasComparison, prospectToCompDays, compToJoinDays][]
   const packedRows = toClientRows(raw);
-  const giftRows = toGiftRows(raw);
-  const joinCompletedRows = toJoinCompletedRows(raw);
-  const pendingRows = toPendingRows(raw);
-  const pendingCompletedRows = toPendingCompletedRows();
-  const cancelledRows = toCancelledRows(raw);
-  const renewalRows = toRenewalRows(raw);
   const callRows = loadCallRows();
   const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
   const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "");
@@ -55,24 +34,11 @@ export async function getServerSideProps(context) {
   return {
     props: {
       packedRows,
-      giftRows,
-      joinCompletedRows,
-      pendingRows,
-      pendingCompletedRows,
-      cancelledRows,
-      renewalRows,
       callRows,
       managers,
       bounds: { min: dateMin, max: dateMax },
     },
   };
-}
-
-// "YYYY-MM-DD" 두 날짜 사이의 일수 (due - today).
-function daysUntilFull(dueDateStr, todayStr) {
-  const due = new Date(dueDateStr + "T00:00:00Z");
-  const today = new Date(todayStr + "T00:00:00Z");
-  return Math.round((due - today) / 86400000);
 }
 
 // "YYYY-MM-DD"에서 n일 전 날짜를 돌려준다.
@@ -82,73 +48,22 @@ function daysAgoDate(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
-// "YYYY-MM-DD" 기준으로 n개월 전 달의 1일을 돌려준다 (n=6, 기준일이 8월이면 3월 1일).
-function monthsAgoStart(dateStr, n) {
-  const [y, m] = dateStr.slice(0, 7).split("-").map(Number);
-  const total = y * 12 + (m - 1) - (n - 1);
-  const yy = Math.floor(total / 12);
-  const mm = (total % 12) + 1;
-  return `${yy}-${String(mm).padStart(2, "0")}-01`;
-}
-
-// dateStr과 같은 "일"을 바로 전달에서 찾아 돌려준다 (전달에 그 일자가 없으면 전달 말일로 캡).
-// 예: 2026-08-24 -> 2026-07-24, 2026-03-31 -> 2026-02-28
-function sameDayLastMonth(dateStr) {
-  const d = new Date(dateStr + "T00:00:00Z");
-  const day = d.getUTCDate();
-  const prevMonthFirst = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1));
-  const prevMonthLastDay = new Date(
-    Date.UTC(prevMonthFirst.getUTCFullYear(), prevMonthFirst.getUTCMonth() + 1, 0)
-  ).getUTCDate();
-  const cappedDay = Math.min(day, prevMonthLastDay);
-  return `${prevMonthFirst.getUTCFullYear()}-${String(prevMonthFirst.getUTCMonth() + 1).padStart(2, "0")}-${String(
-    cappedDay
-  ).padStart(2, "0")}`;
-}
-
-function diffPct(curr, prev) {
-  if (!prev) return null;
-  return ((curr - prev) / prev) * 100;
-}
-
-function deltaLabel(pct) {
-  if (pct == null) return "비교 불가 (직전 동기간 데이터 없음)";
-  const arrow = pct >= 0 ? "▲" : "▼";
-  return `${arrow} ${Math.abs(pct).toFixed(1)}%`;
-}
-
-const PERIOD_TABS = [
-  { key: "daily", label: "일별" },
-  { key: "weekly", label: "주별" },
-  { key: "monthly", label: "월별" },
+const INFLOW_PRESETS = [
+  { key: "7", label: "최근 7일" },
+  { key: "14", label: "최근 14일" },
+  { key: "30", label: "최근 30일" },
+  { key: "all", label: "전체" },
 ];
 
-export default function Home({
-  packedRows,
-  giftRows,
-  joinCompletedRows,
-  pendingRows,
-  pendingCompletedRows,
-  cancelledRows,
-  renewalRows,
-  callRows,
-  managers,
-  bounds,
-}) {
+export default function Home({ packedRows, callRows, managers, bounds }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
+
   // 기본 기간 = 이번 달 1일 ~ 오늘(=데이터상 최신일). bounds.min/max는 date input의 선택 가능 범위로만 쓴다.
   const defaultDateTo = bounds.max;
   const defaultDateFrom = `${defaultDateTo.slice(0, 7)}-01`;
   const [dateFrom, setDateFrom] = useState(defaultDateFrom);
   const [dateTo, setDateTo] = useState(defaultDateTo);
   const [manager, setManager] = useState("ALL");
-  // TODO(로그인 연동): 지금은 이 화면을 보는 사람이 전부 관리자라 true로 고정해뒀다.
-  // 실제 로그인이 들어오면 로그인한 계정의 권한으로 이 값을 대체한다.
-  const isViewerAdmin = true;
-  const [giftShipDate, setGiftShipDate] = useState("");
-  const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
-  // 기간별 실적 — 일별은 항상 펼쳐두고, 주별/월별은 접어둔 채로 시작해서 필요할 때만 펼쳐본다.
-  const [periodOpen, setPeriodOpen] = useState({ weekly: false, monthly: false });
 
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
@@ -156,98 +71,52 @@ export default function Home({
     setManager("ALL");
   };
 
-  // 날짜만 적용 (매니저 랭킹처럼 전체 매니저를 비교할 때 사용)
-  const rangeRows = useMemo(() => filterRows(rows, { dateFrom, dateTo }), [rows, dateFrom, dateTo]);
-  // 날짜 + 매니저 둘 다 적용 (관리자=전체 / 매니저=본인 화면 대부분이 이걸 씀)
-  const scopeRows = useMemo(() => filterRows(rangeRows, { manager }), [rangeRows, manager]);
-
-  const agg = useMemo(() => aggregate(scopeRows), [scopeRows]);
-
-  // 직전 동기간 비교용 — "이번달 1일" 기준점만 필요하다 (상단 날짜 필터와는 별개).
-  const oneMonthStart = useMemo(() => monthsAgoStart(bounds.max, 1), [bounds.max]);
-
-  // 직전 동기간 = 바로 전달의 같은 날짜 범위(이번달 1일~오늘 대비 지난달 1일~같은 일자).
-  // 트렌드 탭(일/주/월)과 무관하게 항상 이번달 vs 지난달로 고정.
-  const curCompareFrom = oneMonthStart; // 이번달 1일
-  const curCompareTo = bounds.max; // 오늘
-  const prevCompareFrom = useMemo(() => monthsAgoStart(bounds.max, 2), [bounds.max]); // 지난달 1일
-  const prevCompareTo = useMemo(() => sameDayLastMonth(bounds.max), [bounds.max]); // 지난달 같은 일자
-
-  const curCompareRows = useMemo(
-    () => filterRows(rows, { dateFrom: curCompareFrom, dateTo: curCompareTo, manager }),
-    [rows, curCompareFrom, curCompareTo, manager]
+  // ── [1] 체결 지표 ──────────────────────────────────────────────
+  const contractSummary = useMemo(
+    () => aggregateContractSummary(rows, callRows, { dateFrom, dateTo, manager }),
+    [rows, callRows, dateFrom, dateTo, manager]
   );
-  const prevCompareRows = useMemo(
-    () => filterRows(rows, { dateFrom: prevCompareFrom, dateTo: prevCompareTo, manager }),
-    [rows, prevCompareFrom, prevCompareTo, manager]
-  );
-  const curCompareAgg = useMemo(() => aggregate(curCompareRows), [curCompareRows]);
-  const prevCompareAgg = useMemo(() => aggregate(prevCompareRows), [prevCompareRows]);
-  const periodComparison = {
-    prevFrom: prevCompareFrom,
-    prevTo: prevCompareTo,
-    premiumPct: diffPct(curCompareAgg.totals.premiumSum, prevCompareAgg.totals.premiumSum),
-    countPct: diffPct(curCompareAgg.totals.count, prevCompareAgg.totals.count),
-    incomplete: prevCompareFrom < bounds.min,
+  const t = contractSummary.totals;
+
+  // ── [2] 고객 인입 지표 (전역 기간 필터와 별개로, 이 섹션만의 기간 선택을 쓴다) ──
+  const [inflowPreset, setInflowPreset] = useState("14");
+  const [inflowFrom, setInflowFrom] = useState(() => daysAgoDate(bounds.max, 13));
+  const [inflowTo, setInflowTo] = useState(bounds.max);
+  const [channelFilter, setChannelFilter] = useState(null); // null = 전체
+
+  const applyInflowPreset = (preset) => {
+    setInflowPreset(preset);
+    if (preset === "all") {
+      setInflowFrom(bounds.min);
+      setInflowTo(bounds.max);
+      return;
+    }
+    const days = Number(preset);
+    setInflowFrom(daysAgoDate(bounds.max, days - 1));
+    setInflowTo(bounds.max);
   };
 
-  const periodRows = useMemo(() => {
-    const build = (key) => {
-      const list = agg.periods[key];
-      const chartSlice = key === "daily" ? list.slice(-30) : list;
-      return { table: [...list].reverse(), chart: chartSlice };
-    };
-    return { daily: build("daily"), weekly: build("weekly"), monthly: build("monthly") };
-  }, [agg]);
-
-  // 담당 딜러 수 — "딜러 전담 매니저"(users.manager_id) 기준. 상담을 처리한 매니저(managerName)와는
-  // 다른 축이라 상단 기간 필터와 무관하게, 전체 = 배정 여부만(체결 이력 전체), 활동 = 오늘(bounds.max)로부터
-  // 최근 60일 이내 체결(=체결일자) 실적이 있는 딜러만 센다.
-  const activeSinceDate = useMemo(() => daysAgoDate(bounds.max, 60), [bounds.max]);
-  const dealerCounts = useMemo(() => {
-    const scope = manager === "ALL" ? rows : rows.filter((r) => r.dealerManagerName === manager);
-    const total = new Set(scope.map((r) => r.dealerKey)).size;
-    const active = new Set(scope.filter((r) => r.date >= activeSinceDate).map((r) => r.dealerKey)).size;
-    return { total, active };
-  }, [rows, manager, activeSinceDate]);
-
-  const gift = useMemo(
-    () => filterGiftRows(giftRows, { dateFrom, dateTo, manager }),
-    [giftRows, dateFrom, dateTo, manager]
+  const allChannels = useMemo(() => [...new Set(rows.map((r) => r.channel))].sort(), [rows]);
+  const inflowRows = useMemo(
+    () => (channelFilter ? rows.filter((r) => r.channel === channelFilter) : rows),
+    [rows, channelFilter]
   );
-  const joinCompleted = useMemo(
-    () => filterListRows(joinCompletedRows, { dateFrom, dateTo, manager }),
-    [joinCompletedRows, dateFrom, dateTo, manager]
+  const inflowChart = useMemo(
+    () => aggregateDailyByChannel(inflowRows, { dateFrom: inflowFrom, dateTo: inflowTo }),
+    [inflowRows, inflowFrom, inflowTo]
   );
-  const pending = useMemo(
-    () => filterListRows(pendingRows, { dateFrom, dateTo, manager }),
-    [pendingRows, dateFrom, dateTo, manager]
-  );
-  const pendingCompleted = useMemo(
-    () => filterListRows(pendingCompletedRows, { dateFrom, dateTo, manager }),
-    [pendingCompletedRows, dateFrom, dateTo, manager]
-  );
-  const cancelled = useMemo(
-    () => filterListRows(cancelledRows, { dateFrom, dateTo, manager }),
-    [cancelledRows, dateFrom, dateTo, manager]
+  const dealChart = useMemo(
+    () => aggregateDailyByChannel(inflowRows, { dateFrom: inflowFrom, dateTo: inflowTo, status: "JOIN_COMPLETED" }),
+    [inflowRows, inflowFrom, inflowTo]
   );
 
-  // 갱신 관리 — 오늘(bounds.max)부터 renewalDaysAhead일 후 사이에 만기가 도래하는 건만
-  // (가입완료 건 한정), 가까운 순으로. 이미 지난(연체) 건은 대상에서 뺀다.
-  const renewalUpcoming = useMemo(() => {
-    return renewalRows
-      .filter((r) => manager === "ALL" || r.managerName === manager)
-      .map((r) => ({ ...r, daysLeft: daysUntilFull(r.dueDate, bounds.max) }))
-      .filter((r) => r.daysLeft >= 0 && r.daysLeft <= renewalDaysAhead)
-      .sort((a, b) => a.daysLeft - b.daysLeft);
-  }, [renewalRows, manager, bounds.max, renewalDaysAhead]);
-  const joinCompletedShown = joinCompleted.slice(0, 30);
-  const pendingShown = pending.slice(0, 30);
-  const pendingCompletedShown = pendingCompleted.slice(0, 30);
-  const managerFunnel = useMemo(
-    () => aggregateManagerFunnel(callRows, rangeRows, { dateFrom, dateTo }),
-    [callRows, rangeRows, dateFrom, dateTo]
+  // ── [3] 회원 지표 ──────────────────────────────────────────────
+  const [memberChannel, setMemberChannel] = useState("ALL");
+  const members = useMemo(
+    () => aggregateMembers(rows, { dateFrom, dateTo, channel: memberChannel }),
+    [rows, dateFrom, dateTo, memberChannel]
   );
+  const groupLabel = (code) => GROUPS.find((g) => g.code === code)?.label || code;
 
   return (
     <>
@@ -293,628 +162,319 @@ export default function Home({
         onReset={resetFilters}
       />
 
-      <div className="demo-banner">
-        원본 {formatCount(rows.length)}건 중 현재 필터로 {formatCount(scopeRows.length)}건을 보고 있습니다.
-        <ul>
-          <li>
-            신차딜러는 배치도 기준 G1(수입)/G2(국산)로 나뉩니다 — business_sub_type이 비어있는 건은 그룹 구분 없이 집계됩니다.
-          </li>
-          <li>비견 퍼널의 "전환율"은 이미 성사된 건만 담긴 데이터 기준이라, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
-        </ul>
-      </div>
-
       <div className="page">
         <div className="page-head">
           <div>
             <h1>실적 대시보드</h1>
-            <p className="sub">체결(지급대기·가입완료) 기준 원수 데이터</p>
+            <p className="sub">체결(지급대기·가입완료) 기준 원수 데이터 · 원수보험료×{Math.round(REVENUE_RATE * 100)}% = 매출액</p>
           </div>
           <span className="range-chip">
             {dateFrom} ~ {dateTo}
           </span>
         </div>
 
-        <div className="kpi-row">
-          <div className="kpi-card">
-            <div className="label">체결건수 합계</div>
-            <div className="kpi-split">
-              <div className="kpi-split-row">
-                <span className="kpi-split-label">가입완료</span>
-                <span className="kpi-split-value">
-                  {agg.totals.joinCompletedCount.toLocaleString("ko-KR")}
-                  <span className="unit">건</span>
-                </span>
+        {/* ============ 1. 체결 지표 ============ */}
+        <section className="section">
+          <div className="section-head">
+            <h2>체결 지표{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+          </div>
+          <p className="section-note">
+            접수는 <b>상담이 생성된 달</b> 기준, 계약·원수보험료·매출액은 <b>매출로 인식된(체결) 달</b> 기준입니다 — 같은 달이어도 서로 다른
+            건을 셉니다. 계약 건수는 가입완료(JOIN_COMPLETED)만 세고, 원수보험료는 가입완료+지급대기 합산입니다.
+          </p>
+
+          <div className="kpi-row">
+            <div className="kpi-card">
+              <div className="label">전체 접수</div>
+              <div className="value">
+                {t.received.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
               </div>
-              <div className="kpi-split-row">
-                <span className="kpi-split-label">지급대기</span>
-                <span className="kpi-split-value">
-                  {agg.totals.pendingCount.toLocaleString("ko-KR")}
-                  <span className="unit">건</span>
-                </span>
+            </div>
+            <div className="kpi-card">
+              <div className="label">신규 접수</div>
+              <div className="value">
+                {t.receivedNew.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">갱신 접수</div>
+              <div className="value">
+                {t.receivedRenewal.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">전환율</div>
+              <div className="value">{formatPercent(t.conversionRate)}</div>
+            </div>
+          </div>
+
+          <div className="kpi-row">
+            <div className="kpi-card">
+              <div className="label">전체 계약</div>
+              <div className="value">
+                {t.dealsTotal.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">신규 계약</div>
+              <div className="value">
+                {t.dealsNew.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">갱신 계약</div>
+              <div className="value">
+                {t.dealsRenewal.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">원수보험료</div>
+              <div className="value" style={{ fontSize: 19 }}>
+                {formatCompactWon(t.premiumSum)}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">매출액</div>
+              <div className="value" style={{ fontSize: 19 }}>
+                {formatCompactWon(t.revenue)}
               </div>
             </div>
           </div>
-          <div className="kpi-card">
-            <div className="label">원수보험료 합계</div>
-            <div className="value" style={{ fontSize: 19 }}>
-              {formatWon(agg.totals.premiumSum)}
-            </div>
-          </div>
-          <MonthTargetCard
-            scopeKey={manager}
-            monthKey={bounds.max.slice(0, 7)}
-            premiumSum={curCompareAgg.totals.premiumSum}
-            defaultTarget={manager === "ALL" ? COMPANY_MONTHLY_TARGET : 0}
-            isAdmin={isViewerAdmin}
-          />
-          <div className="kpi-card">
-            <div className="label">담당 딜러 수</div>
-            <div className="kpi-split">
-              <div className="kpi-split-row">
-                <span className="kpi-split-label">전체</span>
-                <span className="kpi-split-value">
-                  {dealerCounts.total.toLocaleString("ko-KR")}
-                  <span className="unit">명</span>
-                </span>
-              </div>
-              <div className="kpi-split-row">
-                <span className="kpi-split-label">활동(60일)</span>
-                <span className="kpi-split-value">
-                  {dealerCounts.active.toLocaleString("ko-KR")}
-                  <span className="unit">명</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <section className="section">
-          <div className="section-head">
-            <h2>기간별 실적{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-          </div>
-          <p className="section-note">
-            숫자로 확인하는 실적표가 기본이고, 막대(원수보험료)·선(체결건수) 그래프는 추세 파악용 보조 지표입니다. 상단 날짜 필터에서
-            고른 기간({dateFrom} ~ {dateTo}) 기준으로 집계됩니다 — 첫 화면 기본값은 이번달 1일~오늘입니다.
-          </p>
-          <div className="compare-row">
-            <span className="compare-label">
-              직전 동기간(지난달, {periodComparison.prevFrom} ~ {periodComparison.prevTo}) 대비 — 이번달 {curCompareFrom} ~{" "}
-              {curCompareTo} 기준
-            </span>
-            <span className={`compare-value ${periodComparison.premiumPct != null && periodComparison.premiumPct < 0 ? "down" : "up"}`}>
-              원수보험료 {deltaLabel(periodComparison.premiumPct)}
-            </span>
-            <span className={`compare-value ${periodComparison.countPct != null && periodComparison.countPct < 0 ? "down" : "up"}`}>
-              체결건수 {deltaLabel(periodComparison.countPct)}
-            </span>
-            {periodComparison.incomplete && (
-              <span style={{ color: "var(--ink-faint)" }}>
-                ⚠ 데이터가 {bounds.min}부터 시작이라 지난달 실적이 비어 있어 증감률을 비교할 수 없습니다
-              </span>
-            )}
-          </div>
-
-          {PERIOD_TABS.map((t, i) => {
-            const collapsible = t.key !== "daily";
-            const isOpen = !collapsible || periodOpen[t.key];
-            return (
-              <div key={t.key} className="period-block" style={{ marginTop: i === 0 ? 0 : 28 }}>
-                {collapsible ? (
-                  <h3
-                    className="period-block-title"
-                    style={{ cursor: "pointer", userSelect: "none" }}
-                    onClick={() => setPeriodOpen((prev) => ({ ...prev, [t.key]: !prev[t.key] }))}
-                  >
-                    <span style={{ display: "inline-block", width: 14 }}>{isOpen ? "▾" : "▸"}</span>
-                    {t.label}
-                  </h3>
-                ) : (
-                  <h3 className="period-block-title">{t.label}</h3>
-                )}
-                {isOpen && (
-                  <>
-                    <div className="card">
-                      <PeriodChart
-                        data={periodRows[t.key].chart.map((r) => ({
-                          label: formatDateLabel(r.label ?? r.key),
-                          premiumSum: r.premiumSum,
-                          count: r.count,
-                        }))}
-                      />
-                    </div>
-                    <div className="table-wrap table-scroll-6" style={{ marginTop: 12 }}>
-                      <table className="data">
-                        <thead>
-                          <tr>
-                            <th>기간</th>
-                            <th>체결건수</th>
-                            <th>원수보험료 합계</th>
-                            <th>건당 평균</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {periodRows[t.key].table.map((r) => (
-                            <tr key={r.key}>
-                              <td>{formatDateLabel(r.label ?? r.key)}</td>
-                              <td>{formatCount(r.count)}</td>
-                              <td>{formatWon(r.premiumSum)}</td>
-                              <td>{formatWon(r.avgPremium)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>매출 리스트</h2>
-          </div>
-          <p className="section-note">
-            기간을 지정해서 원본에 가까운 건별 데이터를 확인합니다.
-            상담(체결)매니저와 딜러 전담 매니저가 <span style={{ color: "var(--warn)", fontWeight: 600 }}>다른 행은 연한 주황</span>으로
-            표시됩니다.
-          </p>
-          <SalesRawList initialFrom={dateFrom} initialTo={dateTo} bounds={bounds} />
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>가입취소 리스트</h2>
-          </div>
-          <p className="section-note">
-            현재 상태가 실제로 가입취소(JOIN_CANCELLED)인 상담 건만 보여줍니다.
-          </p>
-          <div className="table-wrap">
+          <div className="table-wrap table-scroll-6">
             <table className="data">
               <thead>
                 <tr>
-                  <th>가입취소일시</th>
-                  <th>고객명</th>
-                  <th>연락처</th>
-                  <th>체결일</th>
-                  <th>가입보험사</th>
-                  <th>가입유형</th>
-                  <th>보험료</th>
-                  <th>매니저</th>
-                  <th>딜러(회원)</th>
+                  <th>월</th>
+                  <th>접수</th>
+                  <th>신규계약</th>
+                  <th>갱신계약</th>
+                  <th>계약(합계)</th>
+                  <th>전환율</th>
+                  <th>원수보험료</th>
+                  <th>매출액</th>
                 </tr>
               </thead>
               <tbody>
-                {cancelled.length === 0 && (
+                {contractSummary.months.length === 0 && (
                   <tr>
-                    <td colSpan={9} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      해당 조건에 가입취소 건이 없습니다.
+                    <td colSpan={8} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      선택한 기간에 데이터가 없습니다.
                     </td>
                   </tr>
                 )}
-                {cancelled.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.cancelledAt}</td>
-                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                    <td>{r.phone}</td>
-                    <td>{r.contractDate || "-"}</td>
-                    <td>{r.insurer}</td>
-                    <td>{r.joinType}</td>
-                    <td>{formatWon(r.premium)}</td>
-                    <td>{r.managerName}</td>
-                    <td style={{ textAlign: "left" }}>
-                      {r.dealerName} · {r.dealerManagerName}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>매니저별 체결 순위</h2>
-          </div>
-          <p className="section-note">
-            "콜수"는 선택한 기간에 <b>새로 생성된 상담</b> 건수(생성월 코호트) 기준이고, 원수보험료는 선택한 기간에{" "}
-            <b>매출로 인식된(체결일 기준)</b> 건 기준이라 두 숫자의 기간 의미가 다릅니다 — 8월 콜이 9월에 체결돼도 "8월 콜의 체결"로 잡힙니다.
-            "매출" 컬럼은 계산식이 아직 확정되지 않아 항상 "-"로 표시됩니다.
-          </p>
-          {!managerFunnel.hasCallData && (
-            <p className="section-note" style={{ color: "var(--warn)" }}>
-              ⚠ 콜(상담 생성) 데이터가 아직 연동되지 않았습니다 — 신규/갱신 콜수·체결률은 0으로 표시됩니다.
-              (scripts/snowflake_calls_export.sql 실행 결과를 data/calls.csv로 반영하면 채워집니다.)
-            </p>
-          )}
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th rowSpan={2}>매니저</th>
-                  <th colSpan={3}>신규</th>
-                  <th colSpan={3}>갱신</th>
-                  <th rowSpan={2}>원수보험료</th>
-                  <th rowSpan={2}>매출</th>
-                </tr>
-                <tr>
-                  <th>콜수</th>
-                  <th>체결건수</th>
-                  <th>체결률</th>
-                  <th>콜수</th>
-                  <th>체결건수</th>
-                  <th>체결률</th>
-                </tr>
-              </thead>
-              <tbody>
-                {managerFunnel.rows.map((m) => (
-                  <tr key={m.managerName} className={m.managerName === manager ? "selected" : ""}>
-                    <td style={{ textAlign: "left" }}>{m.managerName}</td>
-                    <td>{formatCount(m.newCalls)}</td>
-                    <td>{formatCount(m.newDeals)}</td>
-                    <td>{formatPercent(m.newRate)}</td>
-                    <td>{formatCount(m.renewalCalls)}</td>
-                    <td>{formatCount(m.renewalDeals)}</td>
-                    <td>{formatPercent(m.renewalRate)}</td>
-                    <td style={{ fontWeight: 600 }}>{formatWon(m.premiumSum)}</td>
-                    <td>-</td>
+                {contractSummary.months.map((m) => (
+                  <tr key={m.month}>
+                    <td style={{ textAlign: "left" }}>{formatDateLabel(m.month)}</td>
+                    <td>{formatCount(m.received)}</td>
+                    <td>{formatCount(m.dealsNew)}</td>
+                    <td>{formatCount(m.dealsRenewal)}</td>
+                    <td>{formatCount(m.dealsTotal)}</td>
+                    <td>{formatPercent(m.conversionRate)}</td>
+                    <td>{formatCompactWon(m.premiumSum)}</td>
+                    <td>{formatCompactWon(m.revenue)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
-                  <td style={{ textAlign: "left" }}>{managerFunnel.totals.managerName}</td>
-                  <td>{formatCount(managerFunnel.totals.newCalls)}</td>
-                  <td>{formatCount(managerFunnel.totals.newDeals)}</td>
-                  <td>{formatPercent(managerFunnel.totals.newRate)}</td>
-                  <td>{formatCount(managerFunnel.totals.renewalCalls)}</td>
-                  <td>{formatCount(managerFunnel.totals.renewalDeals)}</td>
-                  <td>{formatPercent(managerFunnel.totals.renewalRate)}</td>
-                  <td style={{ fontWeight: 600 }}>{formatWon(managerFunnel.totals.premiumSum)}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td style={{ textAlign: "left", color: "var(--ink-muted)" }}>{managerFunnel.average.managerName}</td>
-                  <td>{formatCount(Math.round(managerFunnel.average.newCalls))}</td>
-                  <td>{formatCount(Math.round(managerFunnel.average.newDeals))}</td>
-                  <td>{formatPercent(managerFunnel.average.newRate)}</td>
-                  <td>{formatCount(Math.round(managerFunnel.average.renewalCalls))}</td>
-                  <td>{formatCount(Math.round(managerFunnel.average.renewalDeals))}</td>
-                  <td>{formatPercent(managerFunnel.average.renewalRate)}</td>
-                  <td>{formatWon(Math.round(managerFunnel.average.premiumSum))}</td>
-                  <td>-</td>
+                  <td style={{ textAlign: "left" }}>합계</td>
+                  <td>{formatCount(t.received)}</td>
+                  <td>{formatCount(t.dealsNew)}</td>
+                  <td>{formatCount(t.dealsRenewal)}</td>
+                  <td>{formatCount(t.dealsTotal)}</td>
+                  <td>{formatPercent(t.conversionRate)}</td>
+                  <td>{formatCompactWon(t.premiumSum)}</td>
+                  <td>{formatCompactWon(t.revenue)}</td>
                 </tr>
               </tfoot>
             </table>
           </div>
         </section>
 
+        {/* ============ 2. 고객 인입 지표 ============ */}
         <section className="section">
           <div className="section-head">
-            <h2>가입 보험사 × 가입유형(CM/TM)별 원수보험료{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
-          </div>
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>보험사</th>
-                  {agg.insurerPivot.types.map((t) => (
-                    <th key={t}>{t}</th>
-                  ))}
-                  <th>합계</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agg.insurerPivot.rows.map((row) => (
-                  <tr key={row.insurer}>
-                    <td>{row.insurer}</td>
-                    {agg.insurerPivot.types.map((t) => (
-                      <td key={t}>
-                        {formatWon(row.byType[t])}
-                        <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>
-                          {formatCount(row.byTypeCount[t])}
-                        </span>
-                      </td>
-                    ))}
-                    <td style={{ fontWeight: 600 }}>
-                      {formatWon(row.total)}
-                      <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)", fontWeight: 400 }}>
-                        {formatCount(row.totalCount)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td>합계</td>
-                  {agg.insurerPivot.types.map((t) => (
-                    <td key={t}>
-                      {formatWon(agg.insurerPivot.typeTotals[t])}
-                      <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>
-                        {formatCount(agg.insurerPivot.typeCountTotals[t])}
-                      </span>
-                    </td>
-                  ))}
-                  <td>
-                    {formatWon(agg.insurerPivot.grandTotal)}
-                    <span style={{ display: "block", fontSize: 11, color: "var(--ink-faint)" }}>
-                      {formatCount(agg.insurerPivot.grandCount)}
-                    </span>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>갱신 관리</h2>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 13 }}>
-            <span style={{ color: "var(--ink-muted)" }}>만기 도래</span>
-            <input
-              type="number"
-              min={0}
-              className="date-input"
-              style={{ width: 70, textAlign: "right" }}
-              value={renewalDaysAhead}
-              onChange={(e) => setRenewalDaysAhead(Math.max(0, Number(e.target.value) || 0))}
-            />
-            <span style={{ color: "var(--ink-muted)" }}>일 전부터 표시 (오늘 = {bounds.max} 기준, 가입완료 건 한정, 기본값 45일)</span>
-          </div>
-          <p className="section-note">만기일이 가까운 순으로 정렬됩니다. 이미 만기가 지난 건은 대상에서 제외됩니다.</p>
-          <div className={`table-wrap ${renewalUpcoming.length > 10 ? "table-scroll-sm" : ""}`}>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>만기일</th>
-                  <th>고객명</th>
-                  <th>연락처</th>
-                  <th>기존 보험사</th>
-                  <th>담당 딜러</th>
-                  <th>체결 매니저</th>
-                </tr>
-              </thead>
-              <tbody>
-                {renewalUpcoming.length === 0 && (
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      해당 조건에 갱신 예정 건이 없습니다.
-                    </td>
-                  </tr>
-                )}
-                {renewalUpcoming.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.dueDate}</td>
-                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                    <td>{r.phone}</td>
-                    <td>{r.insurer}</td>
-                    <td>{r.dealerName}</td>
-                    <td>{r.managerName}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>가입완료 리스트</h2>
+            <h2>고객 인입 지표</h2>
           </div>
           <p className="section-note">
-            현재상태 = JOIN_COMPLETED 실제 데이터입니다.
-            {joinCompleted.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(joinCompleted.length)}).`}
+            "유입"은 취소를 제외한 전체 진행 건(최소 지급대기까지 도달한 건 기준 — raw 데이터에 비교견적 등 진행중 상담이 없어 완전한
+            원천 유입은 아닙니다), "체결"은 그중 가입완료(JOIN_COMPLETED)만입니다. 이 섹션의 기간은 상단 전역 필터와 별개입니다.
           </p>
-          <div className="table-wrap table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>체결일자</th>
-                  <th>영업채널</th>
-                  <th>고객명</th>
-                  <th>연락처</th>
-                  <th>차량(차대)번호</th>
-                  <th>새보험만기일</th>
-                  <th>보험료</th>
-                  <th>가입보험사</th>
-                  <th>가입유형</th>
-                  <th>상담매니저</th>
-                  <th>유치회원명</th>
-                  <th>유치회원ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                {joinCompletedShown.length === 0 && (
-                  <tr>
-                    <td colSpan={12} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      해당 조건에 가입완료 건이 없습니다.
-                    </td>
-                  </tr>
-                )}
-                {joinCompletedShown.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.contractDate}</td>
-                    <td>{r.channel}</td>
-                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                    <td>{r.phone}</td>
-                    <td>{r.vin}</td>
-                    <td>{r.expiryDate || "-"}</td>
-                    <td>{formatWon(r.premium)}</td>
-                    <td>{r.insurer}</td>
-                    <td>{r.joinType}</td>
-                    <td>{r.managerName}</td>
-                    <td style={{ textAlign: "left" }}>{r.dealerName}</td>
-                    <td>{r.dealerId || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
 
-        <section className="section">
-          <div className="section-head">
-            <h2>지급대기 리스트</h2>
-          </div>
-          <p className="section-note">
-            현재상태 = ACCUMULATE_PENDING 실제 데이터입니다. "갱신 광고비 적립 요율"은 실제 요율 데이터 소스가 아직 확인되지 않아 항상{" "}
-            "-"로 표시됩니다.
-            {pending.length > 30 && ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pending.length)}).`}
-          </p>
-          <div className="table-wrap table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>체결일자</th>
-                  <th>영업채널</th>
-                  <th>고객명</th>
-                  <th>연락처</th>
-                  <th>차량(차대)번호</th>
-                  <th>새보험만기일</th>
-                  <th>보험료</th>
-                  <th>가입보험사</th>
-                  <th>가입유형</th>
-                  <th>상담매니저</th>
-                  <th>유치회원명</th>
-                  <th>유치회원ID</th>
-                  <th>갱신 광고비 적립 요율</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingShown.length === 0 && (
-                  <tr>
-                    <td colSpan={13} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      해당 조건에 지급대기 건이 없습니다.
-                    </td>
-                  </tr>
-                )}
-                {pendingShown.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.contractDate}</td>
-                    <td>{r.channel}</td>
-                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                    <td>{r.phone}</td>
-                    <td>{r.vin}</td>
-                    <td>{r.expiryDate || "-"}</td>
-                    <td>{formatWon(r.premium)}</td>
-                    <td>{r.insurer}</td>
-                    <td>{r.joinType}</td>
-                    <td>{r.managerName}</td>
-                    <td style={{ textAlign: "left" }}>{r.dealerName}</td>
-                    <td>{r.dealerId || "-"}</td>
-                    <td>{r.adRate == null ? "-" : formatPercent(r.adRate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>'지급대기 → 가입완료' 전환 고객 리스트</h2>
-          </div>
-          <p className="section-note">
-            지급대기(ACCUMULATE_PENDING)로 잡았다가 가입완료로 처리된 실제 데이터입니다 (갱신 계약 등).
-            {pendingCompleted.length > 30 &&
-              ` 최근 30건만 표시하고 스크롤됩니다 (전체 ${formatCount(pendingCompleted.length)}).`}
-          </p>
-          <div className="table-wrap table-scroll">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>지급대기 일자</th>
-                  <th>고객명</th>
-                  <th>상담(체결)담당자</th>
-                  <th>고객 연락처</th>
-                  <th>상태 변경일</th>
-                  <th>현재 상담상태</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingCompletedShown.length === 0 && (
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      해당 조건에 지급대기→가입완료 전환 건이 없습니다.
-                    </td>
-                  </tr>
-                )}
-                {pendingCompletedShown.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.pendingAt}</td>
-                    <td style={{ textAlign: "left" }}>{r.customerName}</td>
-                    <td>{r.managerName}</td>
-                    <td>{r.phone}</td>
-                    <td>{r.changedAt}</td>
-                    <td>{r.currentStatus === "JOIN_COMPLETED" ? "가입완료" : r.currentStatus}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>주유권 발송 대상 리스트</h2>
-            <div className="filter-field">
-              <label>발송예정일자</label>
-              <input type="date" value={giftShipDate} onChange={(e) => setGiftShipDate(e.target.value)} />
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, marginBottom: 14 }}>
+            <div className="toggle-group">
+              {INFLOW_PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className={inflowPreset === p.key ? "active" : ""}
+                  onClick={() => applyInflowPreset(p.key)}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="chip gift">가입완료 + 주유권 선택 고객</span>
-              <button type="button" className="btn-primary">
-                엑셀 다운로드
+            <div className="row" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="date"
+                className="date-input"
+                value={inflowFrom}
+                min={bounds.min}
+                max={inflowTo}
+                onChange={(e) => {
+                  setInflowPreset(null);
+                  setInflowFrom(e.target.value);
+                }}
+              />
+              <span className="sep">~</span>
+              <input
+                type="date"
+                className="date-input"
+                value={inflowTo}
+                min={inflowFrom}
+                max={bounds.max}
+                onChange={(e) => {
+                  setInflowPreset(null);
+                  setInflowTo(e.target.value);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="toggle-group" style={{ flexWrap: "wrap", marginBottom: 16 }}>
+            <button type="button" className={!channelFilter ? "active" : ""} onClick={() => setChannelFilter(null)}>
+              전체
+            </button>
+            {allChannels.map((c, i) => (
+              <button
+                key={c}
+                type="button"
+                className={channelFilter === c ? "active" : ""}
+                onClick={() => setChannelFilter(channelFilter === c ? null : c)}
+              >
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 8,
+                    height: 8,
+                    borderRadius: 2,
+                    background: CHANNEL_PALETTE[i % CHANNEL_PALETTE.length],
+                    marginRight: 6,
+                  }}
+                />
+                {c}
               </button>
+            ))}
+          </div>
+
+          <div className="grid-2" style={{ gridTemplateColumns: "1fr" }}>
+            <div className="card">
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>유입</div>
+              <ChannelStackedChart channels={inflowChart.channels} data={inflowChart.data} />
+            </div>
+            <div className="card" style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>체결</div>
+              <ChannelStackedChart channels={dealChart.channels} data={dealChart.data} />
+            </div>
+          </div>
+        </section>
+
+        {/* ============ 3. 회원 지표 ============ */}
+        <section className="section">
+          <div className="section-head">
+            <h2>회원 지표</h2>
+            <div className="filter-field">
+              <label>영업채널</label>
+              <select value={memberChannel} onChange={(e) => setMemberChannel(e.target.value)}>
+                <option value="ALL">전체</option>
+                {GROUPS.map((g) => (
+                  <option key={g.code} value={g.code}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <p className="section-note">
-            {gift.summary.map((g) => `${g.giftName} ${g.count}건`).join(" · ") || "해당 기간에 주유권 발송 대상이 없습니다."}
-            {gift.summary.length > 0 && ` · 총 ${formatCount(gift.list.length)}`} — 위에서 고른 발송예정일자가 이 목록 전체에 일괄 적용됩니다.
+            상단 전역 기간 필터({dateFrom} ~ {dateTo}) 안에서 체결 이력이 있는 딜러(회원) 기준입니다. "영업채널"은 딜러유형(신차딜러
+            수입/국산·중고차딜러·보험설계사·에이전시) 기준으로 분류됩니다.
           </p>
-          <div className="table-wrap">
+
+          <div className="kpi-row">
+            <div className="kpi-card">
+              <div className="label">전체 회원(딜러) 수</div>
+              <div className="value">
+                {members.totalDealers.toLocaleString("ko-KR")}
+                <span className="unit">명</span>
+              </div>
+            </div>
+            {members.byGroup.slice(0, 3).map((g) => (
+              <div className="kpi-card" key={g.group}>
+                <div className="label">{groupLabel(g.group)}</div>
+                <div className="value">
+                  {g.dealerCount.toLocaleString("ko-KR")}
+                  <span className="unit">명</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {members.byGroup.length > 3 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+              {members.byGroup.slice(3).map((g) => (
+                <span key={g.group} className="chip">
+                  {groupLabel(g.group)} {formatCount(g.dealerCount)}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="table-wrap table-scroll">
             <table className="data">
               <thead>
                 <tr>
-                  <th>체결일</th>
-                  <th>고객명</th>
-                  <th>연락처</th>
-                  <th>권종</th>
-                  <th>담당 딜러</th>
+                  <th>순위</th>
+                  <th>딜러명</th>
+                  <th>영업채널</th>
+                  <th>체결 매니저</th>
+                  <th>체결건수</th>
+                  <th>원수보험료</th>
                 </tr>
               </thead>
               <tbody>
-                {gift.list.map((g, i) => (
-                  <tr key={i}>
-                    <td>{g.date}</td>
-                    <td style={{ textAlign: "left" }}>{g.customerName}</td>
-                    <td>{g.phone}</td>
-                    <td>{g.giftName}</td>
-                    <td>{g.dealerName}</td>
+                {members.dealers.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 조건에 회원이 없습니다.
+                    </td>
+                  </tr>
+                )}
+                {members.dealers.slice(0, 50).map((d, i) => (
+                  <tr key={d.dealerKey}>
+                    <td>
+                      <span className={`rank-badge ${i < 3 ? "top" : ""}`}>{i + 1}</span>
+                    </td>
+                    <td style={{ textAlign: "left" }}>{d.dealerName}</td>
+                    <td>{groupLabel(d.group)}</td>
+                    <td>{d.managerName}</td>
+                    <td>{formatCount(d.count)}</td>
+                    <td style={{ fontWeight: 600 }}>{formatWon(d.premiumSum)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </section>
-
-        <div className="scope-out">
-          <h3>알아두실 점</h3>
-          <ul>
-            <li>매니저별 목표매출은 전사 목표(10억)만 반영했고, 개별 목표는 입력 UI만 만들어뒀습니다 — 값 저장은 브라우저 로컬에만 됩니다</li>
-            <li>상세검색(주민번호/핸드폰/차량번호)은 아직 범위 밖이라 별도로 개발 요청 예정입니다</li>
-            <li>자세한 데이터 매핑·조인 기준은 별도 공유된 배치도 문서를 참고</li>
-          </ul>
-        </div>
       </div>
 
-      <footer className="foot">
-        다이렉트 대시보드 for AFART · Snowflake 실시간 연동
-      </footer>
+      <footer className="foot">다이렉트 대시보드 for AFART · Snowflake 실시간 연동</footer>
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Head from "next/head";
 import {
   loadRawRows,
@@ -22,10 +22,8 @@ import {
 } from "../lib/format";
 import PeriodChart from "../components/PeriodChart";
 import FilterBar from "../components/FilterBar";
-import MockBadge from "../components/MockBadge";
 import SalesRawList from "../components/SalesRawList";
 import MonthTargetCard from "../components/MonthTargetCard";
-import { generateAppSignups, AFFILIATION_OPTIONS } from "../lib/mockData";
 
 const COMPANY_MONTHLY_TARGET = 1_000_000_000; // 원수보험료 기준 월 목표 10억원 (직접 전달받은 값)
 
@@ -136,35 +134,18 @@ export default function Home({
   const [dateFrom, setDateFrom] = useState(defaultDateFrom);
   const [dateTo, setDateTo] = useState(defaultDateTo);
   const [manager, setManager] = useState("ALL");
-  const [affiliation, setAffiliation] = useState(AFFILIATION_OPTIONS[0]);
-  // 로그인이 없는 데모라 "지금 보고 있는 사람이 관리자인지 센터상담사인지"를 별도 토글로 흉내낸다.
-  // 목표 매출 저장 버튼은 어떤 매니저의 데이터를 보고 있는지(manager)와 무관하게 이 값으로만 갈린다 —
-  // 관리자는 매니저를 바꿔가며 각자의 목표를 설정할 수 있고, 센터상담사는 항상 읽기 전용이다.
-  const [viewerRole, setViewerRole] = useState("ADMIN");
-  const isViewerAdmin = viewerRole === "ADMIN";
+  // TODO(로그인 연동): 지금은 이 화면을 보는 사람이 전부 관리자라 true로 고정해뒀다.
+  // 실제 로그인이 들어오면 로그인한 계정의 권한으로 이 값을 대체한다.
+  const isViewerAdmin = true;
   const [giftShipDate, setGiftShipDate] = useState("");
   const [renewalDaysAhead, setRenewalDaysAhead] = useState(45);
   // 기간별 실적 — 일별은 항상 펼쳐두고, 주별/월별은 접어둔 채로 시작해서 필요할 때만 펼쳐본다.
   const [periodOpen, setPeriodOpen] = useState({ weekly: false, monthly: false });
 
-  // 매니저 드롭다운은 소속 선택에 따라 재직중 + 센터상담사 권한을 가진 매니저만 나열된다.
-  // 이 raw pull의 매니저는 전부 소속=파이낸셜로 확인되어(2026-08-27), 다른 소속을 고르면
-  // 목록이 비게 된다 — 실제 서비스에서는 매니저마다 소속이 다양하게 채워져 있을 것이다.
-  const managersInAffiliation = affiliation === "파이낸셜" ? managers : [];
-
-  // 소속을 바꿔서 현재 선택된 매니저가 새 목록에 없으면 '전체'로 되돌린다.
-  useEffect(() => {
-    if (manager !== "ALL" && !managersInAffiliation.includes(manager)) {
-      setManager("ALL");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [affiliation]);
-
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
     setDateTo(defaultDateTo);
     setManager("ALL");
-    setAffiliation(AFFILIATION_OPTIONS[0]);
   };
 
   // 날짜만 적용 (매니저 랭킹처럼 전체 매니저를 비교할 때 사용)
@@ -210,9 +191,6 @@ export default function Home({
     };
     return { daily: build("daily"), weekly: build("weekly"), monthly: build("monthly") };
   }, [agg]);
-
-  const appSignups = useMemo(() => generateAppSignups(dateFrom, dateTo), [dateFrom, dateTo]);
-  const appSignupTotal = appSignups.reduce((s, d) => s + d.count, 0);
 
   // 담당 딜러 수 — "딜러 전담 매니저"(users.manager_id) 기준. 상담을 처리한 매니저(managerName)와는
   // 다른 축이라 상단 기간 필터와 무관하게, 전체 = 배정 여부만(체결 이력 전체), 활동 = 오늘(bounds.max)로부터
@@ -277,23 +255,6 @@ export default function Home({
         <nav>
           <a className="active">실적 대시보드</a>
         </nav>
-        <div className="role-toggle" style={{ marginLeft: "auto" }}>
-          <span className="role-toggle-label">내 권한 (데모)</span>
-          <button
-            type="button"
-            className={viewerRole === "ADMIN" ? "active" : ""}
-            onClick={() => setViewerRole("ADMIN")}
-          >
-            관리자
-          </button>
-          <button
-            type="button"
-            className={viewerRole === "COUNSELOR" ? "active" : ""}
-            onClick={() => setViewerRole("COUNSELOR")}
-          >
-            센터상담사
-          </button>
-        </div>
       </div>
 
       <FilterBar
@@ -303,27 +264,18 @@ export default function Home({
         onDateTo={setDateTo}
         manager={manager}
         onManager={setManager}
-        managers={managersInAffiliation}
+        managers={managers}
         bounds={bounds}
         onReset={resetFilters}
-        affiliation={affiliation}
-        onAffiliation={setAffiliation}
-        affiliationOptions={AFFILIATION_OPTIONS}
       />
 
       <div className="demo-banner">
-        <b>예시 페이지입니다.</b> raw 쿼리 데이터(원본 {formatCount(rows.length)}, 현재 필터 {formatCount(scopeRows.length)})로
-        만든 프로토타입입니다. 매니저·딜러유형·상태이력·지급대기/가입취소는 실제 데이터를 그대로 씁니다. <MockBadge /> 표시가 붙은
-        영역만 이 raw 데이터에 없는 값이라 시연을 위해 만든 샘플입니다.
+        원본 {formatCount(rows.length)}건 중 현재 필터로 {formatCount(scopeRows.length)}건을 보고 있습니다.
         <ul>
-          <li>앱가입현황, 인센티브 요율은 이 raw pull에 아예 없는 값이라 샘플로 대체했습니다.</li>
           <li>
-            신차딜러는 배치도 기준 G1(수입)/G2(국산)로 나뉘는데, business_sub_type이 채워진 CSV를 받으면 자동으로
-            분리됩니다 — 아직 이 값이 없는 raw pull이라 지금은 하나로 묶여 있습니다.
+            신차딜러는 배치도 기준 G1(수입)/G2(국산)로 나뉩니다 — business_sub_type이 비어있는 건은 그룹 구분 없이 집계됩니다.
           </li>
-          <li>비견 퍼널의 "전환율"은 이 raw pull이 이미 성사된 건만 담고 있어, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
-          <li>"소속"에 따라 매니저 드롭다운이 필터링됩니다(소속 + 재직중 + 센터상담사 권한을 만족하는 매니저만 노출). 이 raw pull의 매니저는 전부 소속=파이낸셜로 확인되어, 인슈어런스·파트너스를 고르면 매니저 목록이 비게 됩니다(실제 서비스에서는 매니저마다 소속이 다양합니다).</li>
-          <li>우측 상단 "내 권한" 토글은 로그인이 없는 데모라 지금 보고 있는 사람이 관리자인지 센터상담사인지를 흉내낸 것입니다. 실제 서비스에서는 로그인한 계정의 권한으로 자동 판별됩니다.</li>
+          <li>비견 퍼널의 "전환율"은 이미 성사된 건만 담긴 데이터 기준이라, 손실 건을 포함한 진짜 전환율이 아니라 "체결 건 중 비교견적을 거친 비율"입니다.</li>
         </ul>
       </div>
 
@@ -611,28 +563,6 @@ export default function Home({
                 </tr>
               </tfoot>
             </table>
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-head">
-            <h2>앱 가입현황</h2>
-            <MockBadge />
-          </div>
-          <p className="section-note">raw 데이터엔 앱 회원가입 로그가 없어 선택한 기간 길이에 맞춰 생성한 샘플 추이입니다.</p>
-          <div className="card">
-            <div style={{ marginBottom: 10, fontSize: 13, color: "var(--ink-muted)" }}>
-              선택 기간 신규가입 <b style={{ color: "var(--ink)" }}>{formatCount(appSignupTotal)}</b>
-            </div>
-            <PeriodChart
-              mode="count"
-              valueLabel="앱 가입 건수"
-              data={appSignups.map((d) => ({
-                label: formatDateLabel(d.date),
-                premiumSum: d.count,
-                count: d.count,
-              }))}
-            />
           </div>
         </section>
 
@@ -949,18 +879,17 @@ export default function Home({
         </section>
 
         <div className="scope-out">
-          <h3>실제 서비스 전환 시 필요한 것</h3>
+          <h3>알아두실 점</h3>
           <ul>
-            <li><MockBadge /> 표시가 붙은 섹션(앱가입현황, 인센티브 요율)은 실제 데이터 소스가 생기기 전까지 샘플입니다</li>
             <li>매니저별 목표매출은 전사 목표(10억)만 반영했고, 개별 목표는 입력 UI만 만들어뒀습니다 — 값 저장은 브라우저 로컬에만 됩니다</li>
-            <li>상세검색(주민번호/핸드폰/차량번호)은 이 데모 범위에서 빼고 별도로 개발 요청 예정입니다</li>
+            <li>상세검색(주민번호/핸드폰/차량번호)은 아직 범위 밖이라 별도로 개발 요청 예정입니다</li>
             <li>자세한 데이터 매핑·조인 기준은 별도 공유된 배치도 문서를 참고</li>
           </ul>
         </div>
       </div>
 
       <footer className="foot">
-        다이렉트 대시보드 for AFART · 예시 · raw_query.csv 기반 정적 빌드 + 브라우저 필터링
+        다이렉트 대시보드 for AFART · Snowflake 실시간 연동
       </footer>
     </>
   );

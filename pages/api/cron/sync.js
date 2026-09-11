@@ -1,19 +1,10 @@
 import { runSalesExportQuery } from "../../../lib/snowflakeClient";
 import { uploadSalesCsv } from "../../../lib/blobStore";
+import { rowsToCsv } from "../../../lib/csv";
 
-function toCsvField(value) {
-  if (value === null || value === undefined) return "";
-  const str = String(value);
-  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-}
-
-function rowsToCsv(columns, rows) {
-  const lines = rows.map((row) => columns.map((col) => toCsvField(row[col])).join(","));
-  return [columns.join(","), ...lines].join("\n") + "\n";
-}
-
-// Vercel Cron이 주기적으로 호출 (vercel.json 참고). Snowflake에서 최신 매출 데이터를
-// 받아와 Vercel Blob에 CSV로 저장해두면, 다음 ISR 재생성 때 대시보드가 이 데이터를 읽는다.
+// 대시보드 본 화면(pages/index.js)은 이제 방문마다 Snowflake를 직접 조회한다(getServerSideProps).
+// 이 cron은 그게 실패했을 때(네트워크 문제 등) 쓸 "최근 스냅샷"을 Vercel Blob에 남겨두는
+// 백업 용도다 — vercel.json의 스케줄대로 주기 실행된다.
 export default async function handler(req, res) {
   if (process.env.CRON_SECRET) {
     const expected = `Bearer ${process.env.CRON_SECRET}`;
@@ -26,13 +17,6 @@ export default async function handler(req, res) {
     const { columns, rows } = await runSalesExportQuery();
     const csv = rowsToCsv(columns, rows);
     const url = await uploadSalesCsv(csv);
-
-    // 다음 ISR 주기(30분)를 기다리지 않고 바로 반영 (업로드 API와 동일한 패턴).
-    try {
-      await res.revalidate("/");
-    } catch (revalidateErr) {
-      console.error("즉시 재생성 실패(다음 자동 주기에 반영됨):", revalidateErr.message);
-    }
 
     return res.status(200).json({
       ok: true,

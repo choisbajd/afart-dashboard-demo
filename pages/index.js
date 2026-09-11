@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import Head from "next/head";
 import { getServerSession } from "next-auth/next";
-import { signOut } from "next-auth/react";
 import { authOptions } from "../lib/authOptions";
 import { loadRawRows, loadCallRows, toClientRows } from "../lib/data";
 import { unpackRows } from "../lib/pack";
@@ -14,6 +13,7 @@ import {
 import { formatWon, formatCompactWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
 import { GROUPS } from "../lib/groups";
 import FilterBar from "../components/FilterBar";
+import Sidebar from "../components/Sidebar";
 import ChannelStackedChart, { CHANNEL_PALETTE } from "../components/ChannelStackedChart";
 
 // 방문마다 새로 실행된다(getServerSideProps) — loadRawRows()가 매번 Snowflake를 직접 조회하므로
@@ -58,6 +58,12 @@ const INFLOW_PRESETS = [
   { key: "all", label: "전체" },
 ];
 
+const GRANULARITY_TABS = [
+  { key: "daily", label: "일간" },
+  { key: "weekly", label: "주간" },
+  { key: "monthly", label: "월간" },
+];
+
 export default function Home({ packedRows, callRows, managers, bounds }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
 
@@ -86,6 +92,7 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
   const [inflowFrom, setInflowFrom] = useState(() => daysAgoDate(bounds.max, 13));
   const [inflowTo, setInflowTo] = useState(bounds.max);
   const [channelFilter, setChannelFilter] = useState(null); // null = 전체
+  const [granularity, setGranularity] = useState("daily");
 
   const applyInflowPreset = (preset) => {
     setInflowPreset(preset);
@@ -105,12 +112,18 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
     [rows, channelFilter]
   );
   const inflowChart = useMemo(
-    () => aggregateDailyByChannel(inflowRows, { dateFrom: inflowFrom, dateTo: inflowTo }),
-    [inflowRows, inflowFrom, inflowTo]
+    () => aggregateDailyByChannel(inflowRows, { dateFrom: inflowFrom, dateTo: inflowTo, granularity }),
+    [inflowRows, inflowFrom, inflowTo, granularity]
   );
   const dealChart = useMemo(
-    () => aggregateDailyByChannel(inflowRows, { dateFrom: inflowFrom, dateTo: inflowTo, status: "JOIN_COMPLETED" }),
-    [inflowRows, inflowFrom, inflowTo]
+    () =>
+      aggregateDailyByChannel(inflowRows, {
+        dateFrom: inflowFrom,
+        dateTo: inflowTo,
+        status: "JOIN_COMPLETED",
+        granularity,
+      }),
+    [inflowRows, inflowFrom, inflowTo, granularity]
   );
 
   // ── [3] 회원 지표 ──────────────────────────────────────────────
@@ -128,53 +141,33 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
         <meta name="robots" content="noindex, nofollow, noarchive" />
       </Head>
 
-      <div className="topbar">
-        <div className="logo">
-          다이렉트 대시보드 for <span>AFART</span>
-        </div>
-        <nav>
-          <a className="active">실적 대시보드</a>
-        </nav>
-        <button
-          type="button"
-          onClick={() => signOut({ callbackUrl: "/login" })}
-          style={{
-            marginLeft: "auto",
-            background: "transparent",
-            border: "1px solid var(--border-strong)",
-            borderRadius: 6,
-            padding: "6px 12px",
-            fontSize: 13,
-            color: "var(--ink-muted)",
-            cursor: "pointer",
-          }}
-        >
-          로그아웃
-        </button>
-      </div>
+      <div className="app-shell">
+        <Sidebar />
+        <div className="app-main">
+          <FilterBar
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFrom={setDateFrom}
+            onDateTo={setDateTo}
+            manager={manager}
+            onManager={setManager}
+            managers={managers}
+            bounds={bounds}
+            onReset={resetFilters}
+          />
 
-      <FilterBar
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        onDateFrom={setDateFrom}
-        onDateTo={setDateTo}
-        manager={manager}
-        onManager={setManager}
-        managers={managers}
-        bounds={bounds}
-        onReset={resetFilters}
-      />
-
-      <div className="page">
-        <div className="page-head">
-          <div>
-            <h1>실적 대시보드</h1>
-            <p className="sub">체결(지급대기·가입완료) 기준 원수 데이터 · 원수보험료×{Math.round(REVENUE_RATE * 100)}% = 매출액</p>
-          </div>
-          <span className="range-chip">
-            {dateFrom} ~ {dateTo}
-          </span>
-        </div>
+          <div className="page">
+            <div className="page-head">
+              <div>
+                <h1>파이낸셜</h1>
+                <p className="sub">
+                  체결(지급대기·가입완료) 기준 원수 데이터 · 원수보험료×{Math.round(REVENUE_RATE * 100)}% = 매출액
+                </p>
+              </div>
+              <span className="range-chip">
+                {dateFrom} ~ {dateTo}
+              </span>
+            </div>
 
         {/* ============ 1. 체결 지표 ============ */}
         <section className="section">
@@ -311,23 +304,39 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             원천 유입은 아닙니다), "체결"은 그중 가입완료(JOIN_COMPLETED)만입니다. 이 섹션의 기간은 상단 전역 필터와 별개입니다.
           </p>
 
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 14, marginBottom: 14 }}>
-            <div className="toggle-group">
+          <div className="pill-block">
+            <span className="pill-block-label">기간 단위</span>
+            <div className="pill-group">
+              {GRANULARITY_TABS.map((g) => (
+                <button
+                  key={g.key}
+                  type="button"
+                  className={`pill ${granularity === g.key ? "active" : ""}`}
+                  onClick={() => setGranularity(g.key)}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pill-block">
+            <span className="pill-block-label">조회 기간</span>
+            <div className="pill-group">
               {INFLOW_PRESETS.map((p) => (
                 <button
                   key={p.key}
                   type="button"
-                  className={inflowPreset === p.key ? "active" : ""}
+                  className={`pill ${inflowPreset === p.key ? "active" : ""}`}
                   onClick={() => applyInflowPreset(p.key)}
                 >
                   {p.label}
                 </button>
               ))}
             </div>
-            <div className="row" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div className="pill-daterange">
               <input
                 type="date"
-                className="date-input"
                 value={inflowFrom}
                 min={bounds.min}
                 max={inflowTo}
@@ -339,7 +348,6 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
               <span className="sep">~</span>
               <input
                 type="date"
-                className="date-input"
                 value={inflowTo}
                 min={inflowFrom}
                 max={bounds.max}
@@ -351,30 +359,25 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             </div>
           </div>
 
-          <div className="toggle-group" style={{ flexWrap: "wrap", marginBottom: 16 }}>
-            <button type="button" className={!channelFilter ? "active" : ""} onClick={() => setChannelFilter(null)}>
-              전체
-            </button>
-            {allChannels.map((c, i) => (
-              <button
-                key={c}
-                type="button"
-                className={channelFilter === c ? "active" : ""}
-                onClick={() => setChannelFilter(channelFilter === c ? null : c)}
-              >
-                <span
-                  style={{
-                    display: "inline-block",
-                    width: 8,
-                    height: 8,
-                    borderRadius: 2,
-                    background: CHANNEL_PALETTE[i % CHANNEL_PALETTE.length],
-                    marginRight: 6,
-                  }}
-                />
-                {c}
+          <div className="pill-block" style={{ marginBottom: 20 }}>
+            <span className="pill-block-label">표시 채널</span>
+            <div className="pill-group">
+              {allChannels.map((c, i) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`pill ${channelFilter === c ? "active" : ""}`}
+                  onClick={() => setChannelFilter(channelFilter === c ? null : c)}
+                >
+                  <span className="dot" style={{ background: CHANNEL_PALETTE[i % CHANNEL_PALETTE.length] }} />
+                  {c}
+                </button>
+              ))}
+              <button type="button" className={`pill ${!channelFilter ? "active" : ""}`} onClick={() => setChannelFilter(null)}>
+                전체
               </button>
-            ))}
+            </div>
+            <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>채널을 누르면 그 채널만 봅니다</span>
           </div>
 
           <div className="grid-2" style={{ gridTemplateColumns: "1fr" }}>
@@ -475,9 +478,11 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             </table>
           </div>
         </section>
-      </div>
+          </div>
 
-      <footer className="foot">다이렉트 대시보드 for AFART · Snowflake 실시간 연동</footer>
+          <footer className="foot">다이렉트 대시보드 for AFART · Snowflake 실시간 연동</footer>
+        </div>
+      </div>
     </>
   );
 }

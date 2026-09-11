@@ -28,8 +28,11 @@ export async function getServerSideProps(context) {
   const raw = await loadRawRows();
   const packedRows = toClientRows(raw);
   const callRows = loadCallRows();
-  const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "");
-  const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "");
+  // 데이터가 아예 없으면(Snowflake·Blob·로컬 CSV 전부 실패/빈 상태) reduce가 빈 문자열을 돌려주는데,
+  // 화면의 날짜 계산(daysAgoDate 등)이 그걸 그대로 new Date()에 넘기면 깨진다 — 오늘 날짜로 대체한다.
+  const today = new Date().toISOString().slice(0, 10);
+  const dateMin = packedRows.reduce((m, r) => (m === "" || r[0] < m ? r[0] : m), "") || today;
+  const dateMax = packedRows.reduce((m, r) => (m === "" || r[0] > m ? r[0] : m), "") || today;
   const managers = [...new Set(raw.map((r) => r.managerName).filter(Boolean))].sort();
   return {
     props: {

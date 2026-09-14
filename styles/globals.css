@@ -992,3 +992,43 @@ table.data input[type="date"] {
   color: var(--ink-faint);
   font-size: 12px;
 }
+
+/* ---------- main tab bar (실적요약 / 영업현황 / 앱가입현황 / ...) ---------- */
+.tabbar {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 26px;
+  overflow-x: auto;
+}
+.tabbar button {
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  background: none;
+  border: none;
+  padding: 11px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tabbar button:hover {
+  color: var(--ink-muted);
+}
+.tabbar button.active {
+  color: var(--accent-ink);
+  border-bottom-color: var(--accent);
+}
+.tabbar button .soon {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: 2px;
+}

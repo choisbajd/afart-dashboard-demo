@@ -64,6 +64,14 @@ const GRANULARITY_TABS = [
   { key: "monthly", label: "월간" },
 ];
 
+const MAIN_TABS = [
+  { key: "summary", label: "① 실적 요약" },
+  { key: "sales", label: "② 영업현황(원수보험료)" },
+  { key: "members", label: "③ 앱가입현황" },
+  { key: "manager", label: "④ 매니저 실적", soon: true },
+  { key: "search", label: "⑤ 상세검색", soon: true },
+];
+
 export default function Home({ packedRows, callRows, managers, bounds }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
 
@@ -73,6 +81,7 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
   const [dateFrom, setDateFrom] = useState(defaultDateFrom);
   const [dateTo, setDateTo] = useState(defaultDateTo);
   const [manager, setManager] = useState("ALL");
+  const [activeTab, setActiveTab] = useState("summary");
 
   const resetFilters = () => {
     setDateFrom(defaultDateFrom);
@@ -169,7 +178,22 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
               </span>
             </div>
 
-        {/* ============ 1. 체결 지표 ============ */}
+            <div className="tabbar">
+              {MAIN_TABS.map((tb) => (
+                <button
+                  key={tb.key}
+                  type="button"
+                  className={activeTab === tb.key ? "active" : ""}
+                  onClick={() => setActiveTab(tb.key)}
+                >
+                  {tb.label}
+                  {tb.soon && <span className="soon">준비중</span>}
+                </button>
+              ))}
+            </div>
+
+        {/* ============ 1. 실적 요약 (체결 지표) ============ */}
+        {activeTab === "summary" && (
         <section className="section">
           <div className="section-head">
             <h2>체결 지표{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
@@ -293,8 +317,10 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             </table>
           </div>
         </section>
+        )}
 
-        {/* ============ 2. 고객 인입 지표 ============ */}
+        {/* ============ 2. 영업현황(원수보험료) ============ */}
+        {activeTab === "sales" && (
         <section className="section">
           <div className="section-head">
             <h2>고객 인입 지표</h2>
@@ -391,8 +417,10 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             </div>
           </div>
         </section>
+        )}
 
-        {/* ============ 3. 회원 지표 ============ */}
+        {/* ============ 3. 앱가입현황 ============ */}
+        {activeTab === "members" && (
         <section className="section">
           <div className="section-head">
             <h2>회원 지표</h2>
@@ -478,6 +506,35 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             </table>
           </div>
         </section>
+        )}
+
+        {/* ============ 4. 매니저 실적 (준비중) ============ */}
+        {activeTab === "manager" && (
+        <section className="section">
+          <div className="section-head">
+            <h2>매니저 실적</h2>
+          </div>
+          <div className="card" style={{ textAlign: "center", padding: "48px 20px", color: "var(--ink-muted)" }}>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              매니저별 일/주/월 실적 집계, 이번달 예상 인센티브, 본인 담당 G1~G5 회원수·보험사별 원수보험료를 준비 중입니다.
+            </p>
+          </div>
+        </section>
+        )}
+
+        {/* ============ 5. 상세검색 (준비중) ============ */}
+        {activeTab === "search" && (
+        <section className="section">
+          <div className="section-head">
+            <h2>상세검색</h2>
+          </div>
+          <div className="card" style={{ textAlign: "center", padding: "48px 20px", color: "var(--ink-muted)" }}>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              주민번호 앞자리+이름, 휴대폰번호+이름, 차량번호/차대번호로 고객을 찾는 검색 기능을 준비 중입니다.
+            </p>
+          </div>
+        </section>
+        )}
           </div>
 
           <footer className="foot">다이렉트 대시보드 for AFART · Snowflake 실시간 연동</footer>

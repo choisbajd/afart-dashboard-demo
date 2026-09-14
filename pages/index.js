@@ -84,17 +84,23 @@ const MAIN_TABS = [
 export default function Home({ packedRows, callRows, managers, bounds }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
 
-  // 기본 기간 = 이번 달 1일 ~ 오늘(=데이터상 최신일). bounds.min/max는 date input의 선택 가능 범위로만 쓴다.
-  const defaultDateTo = bounds.max;
-  const defaultDateFrom = `${defaultDateTo.slice(0, 7)}-01`;
-  const [dateFrom, setDateFrom] = useState(defaultDateFrom);
-  const [dateTo, setDateTo] = useState(defaultDateTo);
+  // 날짜 범위를 직접 고르는 기간 필터 대신, 연도 하나만 선택해서 그 해 1/1 ~ (올해면 오늘, 지난해면
+  // 12/31)까지를 기간으로 쓴다. bounds.min/max는 선택 가능한 연도 범위를 정하는 데만 쓴다.
+  const maxYear = Number(bounds.max.slice(0, 4));
+  const minYear = Number(bounds.min.slice(0, 4));
+  const years = useMemo(() => {
+    const arr = [];
+    for (let y = maxYear; y >= minYear; y -= 1) arr.push(y);
+    return arr;
+  }, [maxYear, minYear]);
+  const [year, setYear] = useState(maxYear);
+  const dateFrom = `${year}-01-01`;
+  const dateTo = year === maxYear ? bounds.max : `${year}-12-31`;
   const [manager, setManager] = useState("ALL");
   const [activeTab, setActiveTab] = useState("summary");
 
   const resetFilters = () => {
-    setDateFrom(defaultDateFrom);
-    setDateTo(defaultDateTo);
+    setYear(maxYear);
     setManager("ALL");
   };
 
@@ -105,7 +111,7 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
   );
   const t = contractSummary.totals;
 
-  // ── [2] 고객 인입 지표 (전역 기간 필터와 별개로, 이 섹션만의 기간 선택을 쓴다) ──
+  // ── [2] 고객 인입 지표 (상단 연도 선택과 별개로, 이 섹션만의 기간 선택을 쓴다) ──
   const [inflowPreset, setInflowPreset] = useState("14");
   const [inflowFrom, setInflowFrom] = useState(() => daysAgoDate(bounds.max, 13));
   const [inflowTo, setInflowTo] = useState(bounds.max);
@@ -185,14 +191,12 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
         <Sidebar mainTabs={MAIN_TABS} activeMainTab={activeTab} onMainTabChange={setActiveTab} />
         <div className="app-main">
           <FilterBar
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onDateFrom={setDateFrom}
-            onDateTo={setDateTo}
+            year={year}
+            years={years}
+            onYear={setYear}
             manager={manager}
             onManager={setManager}
             managers={managers}
-            bounds={bounds}
             onReset={resetFilters}
           />
 
@@ -385,7 +389,7 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
           </div>
           <p className="section-note">
             "유입"은 취소를 제외한 전체 진행 건(최소 지급대기까지 도달한 건 기준 — raw 데이터에 비교견적 등 진행중 상담이 없어 완전한
-            원천 유입은 아닙니다), "체결"은 그중 가입완료(JOIN_COMPLETED)만입니다. 이 섹션의 기간은 상단 전역 필터와 별개입니다.
+            원천 유입은 아닙니다), "체결"은 그중 가입완료(JOIN_COMPLETED)만입니다. 이 섹션의 기간은 상단 연도 선택과 별개입니다.
           </p>
 
           <div className="pill-block">
@@ -510,7 +514,7 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             </div>
           </div>
           <p className="section-note">
-            상단 전역 기간 필터({dateFrom} ~ {dateTo}) 안에서 체결 이력이 있는 딜러(회원) 기준입니다. "영업채널"은 딜러유형(신차딜러
+            상단에서 선택한 연도({year}년, {dateFrom} ~ {dateTo}) 안에서 체결 이력이 있는 딜러(회원) 기준입니다. "영업채널"은 딜러유형(신차딜러
             수입/국산·중고차딜러·보험설계사·에이전시) 기준으로 분류됩니다.
           </p>
 
@@ -656,18 +660,6 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="group" style={{ marginTop: 28 }}>
-            <div className="section-head">
-              <h2>이번달 예상 인센티브</h2>
-            </div>
-            <div className="card" style={{ padding: "20px 20px", color: "var(--ink-muted)" }}>
-              <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-faint)" }}>
-                원수보험료 누적액 구간별 요율(인센티브 정책)이 아직 확정되지 않아 계산식을 넣지 못했습니다 — 요율 구간이
-                정해지면 위 매니저별 원수보험료를 그대로 이용해 바로 계산에 반영하겠습니다.
-              </p>
-            </div>
           </div>
 
           <div className="group" style={{ marginTop: 28 }}>

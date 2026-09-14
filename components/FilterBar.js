@@ -1,59 +1,15 @@
-export default function FilterBar({
-  dateFrom,
-  dateTo,
-  onDateFrom,
-  onDateTo,
-  manager,
-  onManager,
-  managers,
-  bounds,
-  onReset,
-}) {
+export default function FilterBar({ year, years, onYear, manager, onManager, managers, onReset }) {
   return (
     <div className="filter-bar">
       <div className="filter-field">
-        <label>기간</label>
-        <div className="row">
-          <input
-            type="date"
-            value={dateFrom}
-            min={bounds.min}
-            max={dateTo}
-            onChange={(e) => onDateFrom(e.target.value)}
-          />
-          <span className="sep">~</span>
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom}
-            max={bounds.max}
-            onChange={(e) => onDateTo(e.target.value)}
-          />
-        </div>
-        <div className="row" style={{ marginTop: 4 }}>
-          <button
-            type="button"
-            className="filter-reset"
-            style={{ padding: "2px 4px" }}
-            onClick={() => {
-              onDateFrom(`${bounds.max.slice(0, 7)}-01`);
-              onDateTo(bounds.max);
-            }}
-          >
-            이번달
-          </button>
-          <button
-            type="button"
-            className="filter-reset"
-            style={{ padding: "2px 4px" }}
-            onClick={() => {
-              onDateFrom(bounds.min);
-              onDateTo(bounds.max);
-            }}
-          >
-            전체 기간
-          </button>
-        </div>
+        <label>연도</label>
+        <select value={year} onChange={(e) => onYear(Number(e.target.value))}>
+          {years.map((y) => (
+            <option key={y} value={y}>
+              {y}년
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="filter-field">

@@ -7,21 +7,21 @@
   --ink-faint: #8b92a0;
   --border: #dcdad2;
   --border-strong: #c3c0b6;
-  --accent: #2452d9;
-  --accent-ink: #13245e;
-  --accent-soft: #e4eafb;
+  --accent: #2f5fd6;
+  --accent-ink: #1b3e9e;
+  --accent-soft: #e7edfc;
   --warn: #c97a22;
   --warn-soft: #f7e6cf;
-  --good: #2e7d5b;
-  --good-soft: #dff0e7;
-  --shadow: 0 1px 2px rgba(28, 33, 41, 0.06), 0 8px 24px -12px rgba(28, 33, 41, 0.12);
+  --good: #1e9d6b;
+  --good-soft: #e2f5ec;
+  --shadow: 0 1px 2px rgba(18, 26, 46, 0.05), 0 10px 28px -16px rgba(18, 26, 46, 0.18);
 
-  --sidebar-bg: #182238;
-  --sidebar-bg-active: #232f4b;
-  --sidebar-ink: #aab4cc;
-  --sidebar-ink-faint: #5d6a8a;
+  --sidebar-bg: #101a33;
+  --sidebar-bg-active: #182648;
+  --sidebar-ink: #b9c3de;
+  --sidebar-ink-faint: #5c6889;
   --sidebar-ink-active: #ffffff;
-  --sidebar-border: #2a3552;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -185,7 +185,7 @@ table {
 .kpi-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px 18px;
   box-shadow: var(--shadow);
 }
@@ -302,7 +302,7 @@ table {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 18px;
   box-shadow: var(--shadow);
 }
@@ -993,42 +993,62 @@ table.data input[type="date"] {
   font-size: 12px;
 }
 
-/* ---------- main tab bar (실적요약 / 영업현황 / 앱가입현황 / ...) ---------- */
-.tabbar {
+/* ---------- 사이드바 안의 옆 탭 (실적요약 / 영업현황 / 앱가입현황 / ...) ---------- */
+/* "파이낸셜" 사이드 메뉴 아래에 세로로 붙는 리포트 탭. 배치도의 상단 가로 탭바 대신
+   사이드바 쪽에 배치해 달라는 요청에 맞춰 옆 탭 형태로 바꿨다. */
+.nav-group {
   display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 26px;
-  overflow-x: auto;
+  flex-direction: column;
 }
-.tabbar button {
+.nav-subtabs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0 6px 14px;
+  margin: 0 0 2px 12px;
+  border-left: 1px solid var(--sidebar-border);
+}
+.nav-subtab {
   font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--ink-faint);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sidebar-ink-faint);
   background: none;
   border: none;
-  padding: 11px 16px;
+  padding: 7px 10px;
+  border-radius: 6px;
   cursor: pointer;
+  text-align: left;
   white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
 }
-.tabbar button:hover {
-  color: var(--ink-muted);
+.nav-subtab:hover {
+  color: var(--sidebar-ink);
 }
-.tabbar button.active {
-  color: var(--accent-ink);
-  border-bottom-color: var(--accent);
+.nav-subtab.active {
+  background: var(--sidebar-bg-active);
+  color: var(--sidebar-ink-active);
 }
-.tabbar button .soon {
-  font-size: 9.5px;
+.nav-subtab .soon {
+  font-size: 9px;
   font-weight: 700;
-  color: var(--ink-faint);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  color: var(--sidebar-ink-faint);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--sidebar-border);
   padding: 1px 5px;
   border-radius: 4px;
-  margin-left: 6px;
-  vertical-align: 2px;
+  margin-left: 5px;
+  vertical-align: 1px;
+}
+
+@media (max-width: 860px) {
+  .nav-group {
+    flex-direction: column;
+  }
+  .nav-subtabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-left: none;
+    padding: 4px 0 0;
+    margin: 0;
+  }
 }

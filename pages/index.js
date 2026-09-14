@@ -150,7 +150,7 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
       </Head>
 
       <div className="app-shell">
-        <Sidebar />
+        <Sidebar mainTabs={MAIN_TABS} activeMainTab={activeTab} onMainTabChange={setActiveTab} />
         <div className="app-main">
           <FilterBar
             dateFrom={dateFrom}
@@ -175,20 +175,6 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
               <span className="range-chip">
                 {dateFrom} ~ {dateTo}
               </span>
-            </div>
-
-            <div className="tabbar">
-              {MAIN_TABS.map((tb) => (
-                <button
-                  key={tb.key}
-                  type="button"
-                  className={activeTab === tb.key ? "active" : ""}
-                  onClick={() => setActiveTab(tb.key)}
-                >
-                  {tb.label}
-                  {tb.soon && <span className="soon">준비중</span>}
-                </button>
-              ))}
             </div>
 
         {/* ============ 1. 실적 요약 (체결 지표) ============ */}

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../lib/authOptions";
-import { loadRawRows, loadCallRows, toClientRows } from "../lib/data";
-import { unpackRows } from "../lib/pack";
+import { loadRawRows, toClientRows } from "../lib/data";
+import { loadDbRows, toDbClientRows } from "../lib/dbData";
+import { unpackRows, unpackDbRows } from "../lib/pack";
 import {
   aggregateContractSummary,
   aggregateDailyByChannel,
@@ -11,8 +12,16 @@ import {
   aggregateByManager,
   aggregateInsurerPivot,
   aggregateGroupBreakdown,
+  aggregateDealerActivity,
   REVENUE_RATE,
 } from "../lib/aggregate";
+import {
+  aggregateDbSummary,
+  aggregateDbTrend,
+  aggregateDbByGroup,
+  aggregateDbFunnel,
+  aggregateDbAging,
+} from "../lib/dbAggregate";
 import { formatWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
 import { GROUPS } from "../lib/groups";
 import FilterBar from "../components/FilterBar";
@@ -30,7 +39,10 @@ export async function getServerSideProps(context) {
 
   const raw = await loadRawRows();
   const packedRows = toClientRows(raw);
-  const callRows = loadCallRows();
+  // "접수/DB" 지표는 더 이상 수기 calls.csv를 안 쓴다 — 매출 쿼리와 분리된 DB 전용 쿼리
+  // (scripts/snowflake_db_export.sql, lib/dbData.js)로 매 방문마다 직접 조회한다.
+  const dbRowsRaw = await loadDbRows();
+  const packedDbRows = toDbClientRows(dbRowsRaw);
   // 데이터가 아예 없으면(Snowflake·Blob·로컬 CSV 전부 실패/빈 상태) reduce가 빈 문자열을 돌려주는데,
   // 화면의 날짜 계산(daysAgoDate 등)이 그걸 그대로 new Date()에 넘기면 깨진다 — 오늘 날짜로 대체한다.
   const today = new Date().toISOString().slice(0, 10);
@@ -40,7 +52,7 @@ export async function getServerSideProps(context) {
   return {
     props: {
       packedRows,
-      callRows,
+      packedDbRows,
       managers,
       bounds: { min: dateMin, max: dateMax },
     },
@@ -80,6 +92,7 @@ const MAIN_TABS = [
   { key: "sales", label: "② 영업현황(원수보험료)" },
   { key: "members", label: "③ 앱가입현황" },
   { key: "manager", label: "④ 매니저 실적" },
+  { key: "dbmembers", label: "⑤ DB/회원 현황" },
 ];
 
 // "YYYY-MM"이 속한 달의 마지막 날짜("YYYY-MM-DD")를 돌려준다.
@@ -88,8 +101,9 @@ function monthEndDate(month) {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
-export default function Home({ packedRows, callRows, managers, bounds }) {
+export default function Home({ packedRows, packedDbRows, managers, bounds }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
+  const dbRows = useMemo(() => unpackDbRows(packedDbRows), [packedDbRows]);
 
   // 날짜 범위를 직접 고르는 기간 필터 대신, 연도 하나만 선택해서 그 해 1/1 ~ (올해면 오늘, 지난해면
   // 12/31)까지를 기간으로 쓴다. bounds.min/max는 선택 가능한 연도 범위를 정하는 데만 쓴다.
@@ -113,8 +127,8 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
 
   // ── [1] 실적(전체) ─────────────────────────────────────────────
   const contractSummary = useMemo(
-    () => aggregateContractSummary(rows, callRows, { dateFrom, dateTo, manager }),
-    [rows, callRows, dateFrom, dateTo, manager]
+    () => aggregateContractSummary(rows, dbRows, { dateFrom, dateTo, manager }),
+    [rows, dbRows, dateFrom, dateTo, manager]
   );
   const t = contractSummary.totals;
 
@@ -132,10 +146,10 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
   const monthSummary = useMemo(
     () =>
       monthDetailRange
-        ? aggregateContractSummary(rows, callRows, { dateFrom: monthDetailRange.from, dateTo: monthDetailRange.to, manager })
+        ? aggregateContractSummary(rows, dbRows, { dateFrom: monthDetailRange.from, dateTo: monthDetailRange.to, manager })
             .totals
         : null,
-    [rows, callRows, monthDetailRange, manager]
+    [rows, dbRows, monthDetailRange, manager]
   );
   const channelBreakdown = useMemo(
     () =>
@@ -208,8 +222,8 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
     return { from: today, to: today };
   }, [managerPeriod, bounds.max]);
   const managerSummary = useMemo(
-    () => aggregateByManager(rows, callRows, { dateFrom: managerPeriodRange.from, dateTo: managerPeriodRange.to }),
-    [rows, callRows, managerPeriodRange]
+    () => aggregateByManager(rows, dbRows, { dateFrom: managerPeriodRange.from, dateTo: managerPeriodRange.to }),
+    [rows, dbRows, managerPeriodRange]
   );
   // 상단 필터바의 "매니저" 선택 = 본인 기준. 전체(ALL)일 땐 개인화 위젯을 숨긴다.
   const myMembers = useMemo(
@@ -219,6 +233,24 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
   const myInsurerPivot = useMemo(
     () => aggregateInsurerPivot(rows, { dateFrom, dateTo, manager }),
     [rows, dateFrom, dateTo, manager]
+  );
+
+  // ── [5] DB / 회원 현황 ─────────────────────────────────────────
+  const [dbGranularity, setDbGranularity] = useState("daily");
+  const dbSummary = useMemo(() => aggregateDbSummary(dbRows, { dateFrom, dateTo, manager }), [dbRows, dateFrom, dateTo, manager]);
+  const dbTrend = useMemo(
+    () => aggregateDbTrend(dbRows, { dateFrom, dateTo, manager, granularity: dbGranularity }),
+    [dbRows, dateFrom, dateTo, manager, dbGranularity]
+  );
+  const dbByChannel = useMemo(() => aggregateDbByGroup(dbRows, { dateFrom, dateTo, groupBy: "channel" }), [dbRows, dateFrom, dateTo]);
+  const dbByManager = useMemo(() => aggregateDbByGroup(dbRows, { dateFrom, dateTo, groupBy: "managerName" }), [dbRows, dateFrom, dateTo]);
+  const dbFunnel = useMemo(() => aggregateDbFunnel(dbRows, { dateFrom, dateTo, manager }), [dbRows, dateFrom, dateTo, manager]);
+  // Aging(방치된 미계약 DB)은 연도 선택과 무관하게 "지금 시점 전체 잔고"를 보여준다 —
+  // 특정 연도만 보고 있으면 그 이전에 쌓인 오래된 미계약 건이 안 보이게 되기 때문이다.
+  const dbAging = useMemo(() => aggregateDbAging(dbRows, { asOfDate: bounds.max, manager }), [dbRows, bounds.max, manager]);
+  const dealerActivity = useMemo(
+    () => aggregateDealerActivity(rows, { asOfDate: bounds.max, dateFrom, dateTo }),
+    [rows, bounds.max, dateFrom, dateTo]
   );
 
   return (
@@ -845,6 +877,338 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
                 </div>
               </div>
             )}
+          </div>
+        </section>
+        )}
+
+        {/* ============ 5. DB / 회원 현황 ============ */}
+        {activeTab === "dbmembers" && (
+        <section className="section">
+          <div className="section-head">
+            <h2>DB 현황{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+          </div>
+          <p className="section-note">
+            "DB"는 database가 아니라 <b>고객 유입으로 생성된 가망 상담(counsel_application)</b> 건입니다. 1건의 상담에 차량이
+            여러 대 등록돼 있어도 DB는 1건으로 셉니다(1 counsel_id = 1 DB). 기준일은 <b>DB 생성일</b>이고, 매출 실적 쿼리(최근
+            90일 증분)와 분리된 별도 쿼리로 전체 이력을 가져옵니다.
+          </p>
+
+          <div className="kpi-row kpi-row-6">
+            <div className="kpi-card">
+              <div className="label">DB 생성</div>
+              <div className="value">
+                {dbSummary.created.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">계약 DB</div>
+              <div className="value">
+                {dbSummary.contracted.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">미계약 DB</div>
+              <div className="value">
+                {dbSummary.uncontracted.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">담당자 배정</div>
+              <div className="value">
+                {dbSummary.assigned.toLocaleString("ko-KR")}
+                <span className="unit">건</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">DB 계약 전환율</div>
+              <div className="value">{formatPercent(dbSummary.dbConversionRate)}</div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">견적→계약 전환율</div>
+              <div className="value">{formatPercent(dbSummary.comparisonToContractRate)}</div>
+            </div>
+          </div>
+
+          <div className="group">
+            <div className="section-head">
+              <h2>DB 생성 추이</h2>
+            </div>
+            <div className="pill-block">
+              <div className="pill-group">
+                {GRANULARITY_TABS.map((g) => (
+                  <button
+                    key={g.key}
+                    type="button"
+                    className={`pill ${dbGranularity === g.key ? "active" : ""}`}
+                    onClick={() => setDbGranularity(g.key)}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="table-wrap table-scroll-6">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>기간</th>
+                    <th>DB 생성</th>
+                    <th>계약</th>
+                    <th>전환율</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dbTrend.length === 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                        선택한 기간에 데이터가 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                  {dbTrend.map((b) => (
+                    <tr key={b.key}>
+                      <td style={{ textAlign: "left" }}>{formatDateLabel(b.key)}</td>
+                      <td>{formatCount(b.created)}</td>
+                      <td>{formatCount(b.contracted)}</td>
+                      <td>{formatPercent(b.conversionRate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="grid-2">
+            <div className="group">
+              <div className="section-head">
+                <h2>채널별 DB</h2>
+              </div>
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>채널</th>
+                      <th>DB</th>
+                      <th>비중</th>
+                      <th>계약</th>
+                      <th>전환율</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dbByChannel.groups.length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                          데이터가 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                    {dbByChannel.groups.map((g) => (
+                      <tr key={g.key}>
+                        <td style={{ textAlign: "left" }}>{g.key}</td>
+                        <td>{formatCount(g.created)}</td>
+                        <td>{formatPercent(g.share)}</td>
+                        <td>{formatCount(g.contracted)}</td>
+                        <td>{formatPercent(g.conversionRate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="group">
+              <div className="section-head">
+                <h2>매니저별 DB 활용</h2>
+              </div>
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>매니저</th>
+                      <th>배정 DB</th>
+                      <th>계약</th>
+                      <th>미계약</th>
+                      <th>전환율</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dbByManager.groups.length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                          데이터가 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                    {dbByManager.groups.map((g) => (
+                      <tr key={g.key}>
+                        <td style={{ textAlign: "left" }}>{g.key}</td>
+                        <td>{formatCount(g.created)}</td>
+                        <td>{formatCount(g.contracted)}</td>
+                        <td>{formatCount(g.uncontracted)}</td>
+                        <td>{formatPercent(g.conversionRate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid-2">
+            <div className="group">
+              <div className="section-head">
+                <h2>DB Funnel</h2>
+              </div>
+              <p className="section-note" style={{ marginTop: -6 }}>
+                실제 데이터로 확인 가능한 단계만 보여줍니다 — "상담 진행중" 같은 중간 상태는 별도 값이 없어 뺐습니다.
+              </p>
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>단계</th>
+                      <th>건수</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dbFunnel.map((f) => (
+                      <tr key={f.stage}>
+                        <td style={{ textAlign: "left" }}>{f.stage}</td>
+                        <td>{formatCount(f.count)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="group">
+              <div className="section-head">
+                <h2>DB Aging (미계약 · 취소 제외, {formatDateLabel(bounds.max)} 기준)</h2>
+              </div>
+              <p className="section-note" style={{ marginTop: -6 }}>
+                연도 선택과 무관하게 지금 쌓여있는 전체 미계약 DB 기준입니다. 경과일은 DB 생성일 기준입니다.
+              </p>
+              <div className="table-wrap">
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>경과</th>
+                      <th>건수</th>
+                      <th>비중</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dbAging.buckets.map((b) => (
+                      <tr key={b.key}>
+                        <td style={{ textAlign: "left" }}>{b.label}</td>
+                        <td>{formatCount(b.count)}</td>
+                        <td>{formatPercent(b.share)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td style={{ textAlign: "left" }}>합계</td>
+                      <td>{formatCount(dbAging.total)}</td>
+                      <td>100.0%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="section-head" style={{ marginTop: 28 }}>
+            <h2>회원(딜러) 현황</h2>
+          </div>
+          <p className="section-note">
+            회원가입일(딜러 앱 가입일) 이후 6개월 이내 계약이 1건 이상이면 활동회원입니다. 단,{" "}
+            <b>상담을 한 번도 만들지 않은 가입 딜러는 매출 쿼리에 안 잡혀서 이 집계에서 빠집니다</b> — 전체 가입회원 수 자체는
+            실제보다 적게 나올 수 있습니다(정확한 전체 회원수가 필요하면 users 테이블 전용 쿼리가 별도로 있어야 합니다).
+          </p>
+          <div className="kpi-row kpi-row-6">
+            <div className="kpi-card">
+              <div className="label">신규 가입회원</div>
+              <div className="value">
+                {dealerActivity.totals.newDealers.toLocaleString("ko-KR")}
+                <span className="unit">명</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">현재 활동회원</div>
+              <div className="value">
+                {dealerActivity.totals.currentActiveDealers.toLocaleString("ko-KR")}
+                <span className="unit">명</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">현재 활동회원율</div>
+              <div className="value">{formatPercent(dealerActivity.totals.currentActiveRate)}</div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">6개월 활동회원 확정률</div>
+              <div className="value">{formatPercent(dealerActivity.totals.confirmedActiveRate)}</div>
+              <div className="label" style={{ marginTop: 4 }}>
+                가입 후 6개월 지난 {formatCount(dealerActivity.totals.closedCohortDealers)} 중
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">확정 비활동회원</div>
+              <div className="value">
+                {dealerActivity.totals.confirmedInactiveDealers.toLocaleString("ko-KR")}
+                <span className="unit">명</span>
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">가입일 데이터 보유 회원</div>
+              <div className="value">
+                {dealerActivity.totals.totalDealers.toLocaleString("ko-KR")}
+                <span className="unit">명</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="group">
+            <div className="section-head">
+              <h2>가입월 Cohort</h2>
+            </div>
+            <div className="table-wrap table-scroll">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left" }}>가입월</th>
+                    <th>가입자수</th>
+                    <th>1개월내 계약</th>
+                    <th>3개월내 계약</th>
+                    <th>6개월내 계약</th>
+                    <th>6개월 확정률</th>
+                    <th>인당 평균 계약건수</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dealerActivity.cohorts.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                        회원가입일 데이터가 있는 딜러가 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                  {dealerActivity.cohorts.map((c) => (
+                    <tr key={c.cohort}>
+                      <td style={{ textAlign: "left" }}>{formatDateLabel(c.cohort)}</td>
+                      <td>{formatCount(c.dealerCount)}</td>
+                      <td>{formatCount(c.within1mo)}</td>
+                      <td>{formatCount(c.within3mo)}</td>
+                      <td>{formatCount(c.within6mo)}</td>
+                      <td>{c.confirmedActiveRate == null ? "관찰중" : formatPercent(c.confirmedActiveRate)}</td>
+                      <td>{c.avgContractsPerDealer.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
         )}

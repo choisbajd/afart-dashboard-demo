@@ -20,6 +20,9 @@
 --   - "딜러세부유형" = users.business_sub_type (IMPORTED: 수입 / DOMESTIC: 국산).
 --     신차딜러(NEW_CAR_DEALER)를 배치도 기준 G1(수입)/G2(국산)로 나누는 데 씀 — lib/groups.js 참고.
 --   - "가입유형" = counsel_application.subscription_type (원본 값 그대로 사용)
+--   - "회원가입일" = users.join_at — 활동회원(가입 후 6개월 이내 계약) 판정용으로 추가.
+--     이미 JOIN돼 있는 USERS에서 컬럼 하나만 더 뽑는 것이라 JOIN 구조·WHERE·grain은
+--     그대로다(기존 실적 집계에 영향 없음).
 --   - "가입보험사" = counsel_application.join_insurer_code를 한글명으로 CASE 매핑
 --   - "체결일자"(=매출인식일) = 상태이력에 지급대기(ACCUMULATE_PENDING) 로그가 한 번이라도
 --     있으면 "현재 상태와 무관하게" 최초로 그 상태에 도달한 시각(pending_at)을 쓴다.
@@ -90,7 +93,8 @@ masked AS (
     u.business_sub_type,
     u.business_card_status,
     u.manager_id                                                       AS dealer_manager_id,
-    u.sales_channel_id
+    u.sales_channel_id,
+    u.join_at                                                          AS dealer_join_at
   FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
   JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.counsel_id = ca.counsel_id AND cv.is_deleted = FALSE
   JOIN AJDCAR_PROD.PUBLIC.CUSTOMER cu        ON cu.customer_id = ca.customer_id AND cu.is_deleted = FALSE
@@ -165,7 +169,8 @@ SELECT
   cm.name                                                               AS "상담(체결)매니저",
   dm.name                                                               AS "딜러전담매니저",
   CASE WHEN m.is_renewal THEN '갱신' ELSE '신규' END                    AS "상담구분",
-  m.business_sub_type                                                  AS "딜러세부유형"
+  m.business_sub_type                                                  AS "딜러세부유형",
+  TO_CHAR(m.dealer_join_at, 'YYYY-MM-DD')                              AS "회원가입일"
 FROM masked m
 JOIN status_agg sa        ON sa.counsel_id = m.counsel_id
 LEFT JOIN AJDCAR_PROD.PUBLIC.GIFT g           ON g.gift_id = m.gift_id

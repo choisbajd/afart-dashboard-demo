@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../lib/authOptions";
@@ -10,6 +10,7 @@ import {
   aggregateMembers,
   aggregateByManager,
   aggregateInsurerPivot,
+  aggregateGroupBreakdown,
   REVENUE_RATE,
 } from "../lib/aggregate";
 import { formatWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
@@ -75,11 +76,17 @@ const GRANULARITY_TABS = [
 ];
 
 const MAIN_TABS = [
-  { key: "summary", label: "① 실적 요약" },
+  { key: "summary", label: "실적(전체)" },
   { key: "sales", label: "② 영업현황(원수보험료)" },
   { key: "members", label: "③ 앱가입현황" },
   { key: "manager", label: "④ 매니저 실적" },
 ];
+
+// "YYYY-MM"이 속한 달의 마지막 날짜("YYYY-MM-DD")를 돌려준다.
+function monthEndDate(month) {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
 
 export default function Home({ packedRows, callRows, managers, bounds }) {
   const rows = useMemo(() => unpackRows(packedRows), [packedRows]);
@@ -104,12 +111,46 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
     setManager("ALL");
   };
 
-  // ── [1] 체결 지표 ──────────────────────────────────────────────
+  // ── [1] 실적(전체) ─────────────────────────────────────────────
   const contractSummary = useMemo(
     () => aggregateContractSummary(rows, callRows, { dateFrom, dateTo, manager }),
     [rows, callRows, dateFrom, dateTo, manager]
   );
   const t = contractSummary.totals;
+
+  // 월별 표에서 한 달을 클릭하면(또는 아래 "기간" 선택에서 고르면) 그 달의 채널별·상담사별
+  // 상세로 화면이 바뀐다. year를 바꾸면 지금 보던 달이 그 해에 없을 수 있으니 초기화한다.
+  const [monthFilter, setMonthFilter] = useState("ALL");
+  useEffect(() => {
+    setMonthFilter("ALL");
+  }, [year]);
+  const monthDetailRange = useMemo(() => {
+    if (monthFilter === "ALL") return null;
+    const end = monthEndDate(monthFilter);
+    return { from: `${monthFilter}-01`, to: end > bounds.max ? bounds.max : end };
+  }, [monthFilter, bounds.max]);
+  const monthSummary = useMemo(
+    () =>
+      monthDetailRange
+        ? aggregateContractSummary(rows, callRows, { dateFrom: monthDetailRange.from, dateTo: monthDetailRange.to, manager })
+            .totals
+        : null,
+    [rows, callRows, monthDetailRange, manager]
+  );
+  const channelBreakdown = useMemo(
+    () =>
+      monthDetailRange
+        ? aggregateGroupBreakdown(rows, { dateFrom: monthDetailRange.from, dateTo: monthDetailRange.to, manager, groupBy: "channel" })
+        : null,
+    [rows, monthDetailRange, manager]
+  );
+  const managerBreakdown = useMemo(
+    () =>
+      monthDetailRange
+        ? aggregateGroupBreakdown(rows, { dateFrom: monthDetailRange.from, dateTo: monthDetailRange.to, manager, groupBy: "managerName" })
+        : null,
+    [rows, monthDetailRange, manager]
+  );
 
   // ── [2] 고객 인입 지표 (상단 연도 선택과 별개로, 이 섹션만의 기간 선택을 쓴다) ──
   const [inflowPreset, setInflowPreset] = useState("14");
@@ -213,171 +254,239 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
               </span>
             </div>
 
-        {/* ============ 1. 실적 요약 (체결 지표) ============ */}
+        {/* ============ 1. 실적(전체) ============ */}
         {activeTab === "summary" && (
         <section className="section">
           <div className="section-head">
-            <h2>체결 지표{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+            <h2>실적(전체){manager !== "ALL" ? ` — ${manager}` : ""}</h2>
           </div>
           <p className="section-note">
             접수는 <b>상담이 생성된 달</b> 기준, 계약·원수보험료·매출액은 <b>매출로 인식된(체결) 달</b> 기준입니다 — 같은 달이어도 서로 다른
             건을 셉니다. 계약 건수는 가입완료(JOIN_COMPLETED)만 세고, 원수보험료는 가입완료+지급대기 합산입니다.
           </p>
 
-          <div className="kpi-row">
-            <div className="kpi-card">
-              <div className="label">전체 접수</div>
-              <div className="value">
-                {t.received.toLocaleString("ko-KR")}
-                <span className="unit">건</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">신규 접수</div>
-              <div className="value">
-                {t.receivedNew.toLocaleString("ko-KR")}
-                <span className="unit">건</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">갱신 접수</div>
-              <div className="value">
-                {t.receivedRenewal.toLocaleString("ko-KR")}
-                <span className="unit">건</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">전환율</div>
-              <div className="value">{formatPercent(t.conversionRate)}</div>
-            </div>
+          <div className="pill-block">
+            <span className="pill-block-label">기간</span>
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              style={{ fontFamily: "inherit", fontSize: 13, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6 }}
+            >
+              <option value="ALL">전체 · 월별</option>
+              {contractSummary.months.map((m) => (
+                <option key={m.month} value={m.month}>
+                  {formatDateLabel(m.month)}
+                </option>
+              ))}
+            </select>
+            {monthFilter !== "ALL" && (
+              <button type="button" className="filter-reset" onClick={() => setMonthFilter("ALL")}>
+                ← 월별 목록으로
+              </button>
+            )}
           </div>
 
-          <div className="kpi-row">
-            <div className="kpi-card">
-              <div className="label">전체 계약</div>
-              <div className="value">
-                {t.dealsTotal.toLocaleString("ko-KR")}
-                <span className="unit">건</span>
+          {(() => {
+            const k = monthFilter === "ALL" ? t : monthSummary;
+            return (
+              <div className="kpi-row kpi-row-6">
+                <div className="kpi-card">
+                  <div className="label">접수</div>
+                  <div className="value">
+                    {k.received.toLocaleString("ko-KR")}
+                    <span className="unit">건</span>
+                  </div>
+                </div>
+                <div className="kpi-card">
+                  <div className="label">계약</div>
+                  <div className="value">
+                    {k.dealsTotal.toLocaleString("ko-KR")}
+                    <span className="unit">건</span>
+                  </div>
+                </div>
+                <div className="kpi-card">
+                  <div className="label">갱신</div>
+                  <div className="value">
+                    {k.dealsRenewal.toLocaleString("ko-KR")}
+                    <span className="unit">건</span>
+                  </div>
+                </div>
+                <div className="kpi-card">
+                  <div className="label">전환율</div>
+                  <div className="value">{formatPercent(k.conversionRate)}</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="label">원수보험료</div>
+                  <div className="value" style={{ fontSize: 17 }}>
+                    {formatWon(k.premiumSum)}
+                  </div>
+                </div>
+                <div className="kpi-card">
+                  <div className="label">매출액</div>
+                  <div className="value" style={{ fontSize: 17 }}>
+                    {formatWon(k.revenue)}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">신규 계약</div>
-              <div className="value">
-                {t.dealsNew.toLocaleString("ko-KR")}
-                <span className="unit">건</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">갱신 계약</div>
-              <div className="value">
-                {t.dealsRenewal.toLocaleString("ko-KR")}
-                <span className="unit">건</span>
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">원수보험료 (전체)</div>
-              <div className="value" style={{ fontSize: 17 }}>
-                {formatWon(t.premiumSum)}
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">원수보험료 (신규)</div>
-              <div className="value" style={{ fontSize: 17 }}>
-                {formatWon(t.premiumSumNew)}
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">원수보험료 (갱신)</div>
-              <div className="value" style={{ fontSize: 17 }}>
-                {formatWon(t.premiumSumRenewal)}
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">매출액 (전체)</div>
-              <div className="value" style={{ fontSize: 17 }}>
-                {formatWon(t.revenue)}
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">매출액 (신규)</div>
-              <div className="value" style={{ fontSize: 17 }}>
-                {formatWon(t.revenueNew)}
-              </div>
-            </div>
-            <div className="kpi-card">
-              <div className="label">매출액 (갱신)</div>
-              <div className="value" style={{ fontSize: 17 }}>
-                {formatWon(t.revenueRenewal)}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
-          <div className="table-wrap table-scroll-6">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th rowSpan={2}>월</th>
-                  <th rowSpan={2}>접수</th>
-                  <th colSpan={3}>계약</th>
-                  <th rowSpan={2}>전환율</th>
-                  <th colSpan={3}>원수보험료</th>
-                  <th colSpan={3}>매출액</th>
-                </tr>
-                <tr>
-                  <th>신규</th>
-                  <th>갱신</th>
-                  <th>합계</th>
-                  <th>전체</th>
-                  <th>신규</th>
-                  <th>갱신</th>
-                  <th>전체</th>
-                  <th>신규</th>
-                  <th>갱신</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contractSummary.months.length === 0 && (
+          {monthFilter === "ALL" ? (
+            <div className="table-wrap table-scroll-6">
+              <table className="data">
+                <thead>
                   <tr>
-                    <td colSpan={12} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
-                      선택한 기간에 데이터가 없습니다.
-                    </td>
+                    <th>월</th>
+                    <th>접수</th>
+                    <th>계약</th>
+                    <th>갱신</th>
+                    <th>전환율</th>
+                    <th>원수보험료</th>
+                    <th>매출액</th>
                   </tr>
-                )}
-                {contractSummary.months.map((m) => (
-                  <tr key={m.month}>
-                    <td style={{ textAlign: "left" }}>{formatDateLabel(m.month)}</td>
-                    <td>{formatCount(m.received)}</td>
-                    <td>{formatCount(m.dealsNew)}</td>
-                    <td>{formatCount(m.dealsRenewal)}</td>
-                    <td>{formatCount(m.dealsTotal)}</td>
-                    <td>{formatPercent(m.conversionRate)}</td>
-                    <td>{formatWon(m.premiumSum)}</td>
-                    <td>{formatWon(m.premiumSumNew)}</td>
-                    <td>{formatWon(m.premiumSumRenewal)}</td>
-                    <td>{formatWon(m.revenue)}</td>
-                    <td>{formatWon(m.revenueNew)}</td>
-                    <td>{formatWon(m.revenueRenewal)}</td>
+                </thead>
+                <tbody>
+                  {contractSummary.months.length === 0 && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                        선택한 기간에 데이터가 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                  {contractSummary.months.map((m) => (
+                    <tr key={m.month} className="row-clickable" onClick={() => setMonthFilter(m.month)}>
+                      <td style={{ textAlign: "left" }}>{formatDateLabel(m.month)}</td>
+                      <td>{formatCount(m.received)}</td>
+                      <td>{formatCount(m.dealsTotal)}</td>
+                      <td>{formatCount(m.dealsRenewal)}</td>
+                      <td>{formatPercent(m.conversionRate)}</td>
+                      <td>{formatWon(m.premiumSum)}</td>
+                      <td>{formatWon(m.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td style={{ textAlign: "left" }}>합계</td>
+                    <td>{formatCount(t.received)}</td>
+                    <td>{formatCount(t.dealsTotal)}</td>
+                    <td>{formatCount(t.dealsRenewal)}</td>
+                    <td>{formatPercent(t.conversionRate)}</td>
+                    <td>{formatWon(t.premiumSum)}</td>
+                    <td>{formatWon(t.revenue)}</td>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td style={{ textAlign: "left" }}>합계</td>
-                  <td>{formatCount(t.received)}</td>
-                  <td>{formatCount(t.dealsNew)}</td>
-                  <td>{formatCount(t.dealsRenewal)}</td>
-                  <td>{formatCount(t.dealsTotal)}</td>
-                  <td>{formatPercent(t.conversionRate)}</td>
-                  <td>{formatWon(t.premiumSum)}</td>
-                  <td>{formatWon(t.premiumSumNew)}</td>
-                  <td>{formatWon(t.premiumSumRenewal)}</td>
-                  <td>{formatWon(t.revenue)}</td>
-                  <td>{formatWon(t.revenueNew)}</td>
-                  <td>{formatWon(t.revenueRenewal)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </tfoot>
+              </table>
+            </div>
+          ) : (
+            <>
+              <p className="section-note">
+                아래 채널별·상담사별 접수는 콜 생성 기준이 아니라 <b>{formatDateLabel(monthFilter)}에 원수 데이터상 진행된(취소 제외) 건수</b>
+                입니다 — 콜 데이터에는 채널 정보가 없어서, 위 KPI의 접수(콜 생성 기준)와 아래 표의 접수 합계가 다를 수 있습니다.
+              </p>
+
+              <div className="group">
+                <div className="section-head">
+                  <h2>채널별</h2>
+                </div>
+                <div className="table-wrap">
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left" }}>채널</th>
+                        <th>접수</th>
+                        <th>구성비</th>
+                        <th>계약</th>
+                        <th>전환율</th>
+                        <th>원수보험료</th>
+                        <th>매출액</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {channelBreakdown.groups.length === 0 && (
+                        <tr>
+                          <td colSpan={7} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                            해당 월에 데이터가 없습니다.
+                          </td>
+                        </tr>
+                      )}
+                      {channelBreakdown.groups.map((g) => (
+                        <tr key={g.key}>
+                          <td style={{ textAlign: "left" }}>{g.key}</td>
+                          <td>{formatCount(g.received)}</td>
+                          <td>{formatPercent(g.share)}</td>
+                          <td>{formatCount(g.dealsTotal)}</td>
+                          <td>{formatPercent(g.conversionRate)}</td>
+                          <td>{formatWon(g.premiumSum)}</td>
+                          <td>{formatWon(g.revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td style={{ textAlign: "left" }}>합계</td>
+                        <td>{formatCount(channelBreakdown.totals.received)}</td>
+                        <td>{formatPercent(channelBreakdown.totals.share)}</td>
+                        <td>{formatCount(channelBreakdown.totals.dealsTotal)}</td>
+                        <td>{formatPercent(channelBreakdown.totals.conversionRate)}</td>
+                        <td>{formatWon(channelBreakdown.totals.premiumSum)}</td>
+                        <td>{formatWon(channelBreakdown.totals.revenue)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div className="group" style={{ marginTop: 24 }}>
+                <div className="section-head">
+                  <h2>상담사별</h2>
+                </div>
+                <div className="table-wrap">
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left" }}>상담사</th>
+                        <th>접수</th>
+                        <th>계약</th>
+                        <th>전환율</th>
+                        <th>원수보험료</th>
+                        <th>매출액</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {managerBreakdown.groups.length === 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                            해당 월에 데이터가 없습니다.
+                          </td>
+                        </tr>
+                      )}
+                      {managerBreakdown.groups.map((g) => (
+                        <tr key={g.key}>
+                          <td style={{ textAlign: "left" }}>{g.key}</td>
+                          <td>{formatCount(g.received)}</td>
+                          <td>{formatCount(g.dealsTotal)}</td>
+                          <td>{formatPercent(g.conversionRate)}</td>
+                          <td>{formatWon(g.premiumSum)}</td>
+                          <td>{formatWon(g.revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td style={{ textAlign: "left" }}>합계</td>
+                        <td>{formatCount(managerBreakdown.totals.received)}</td>
+                        <td>{formatCount(managerBreakdown.totals.dealsTotal)}</td>
+                        <td>{formatPercent(managerBreakdown.totals.conversionRate)}</td>
+                        <td>{formatWon(managerBreakdown.totals.premiumSum)}</td>
+                        <td>{formatWon(managerBreakdown.totals.revenue)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
         </section>
         )}
 

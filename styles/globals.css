@@ -379,6 +379,12 @@ table.data tbody td.manager-mismatch {
 table.data tbody tr:nth-child(even) {
   background: rgba(28, 33, 41, 0.015);
 }
+table.data tbody tr.row-clickable {
+  cursor: pointer;
+}
+table.data tbody tr.row-clickable:hover td {
+  background: var(--accent-soft);
+}
 table.data tfoot td {
   padding: 10px 14px;
   font-weight: 700;
@@ -774,6 +780,10 @@ table.data input[type="date"] {
   max-height: 258px;
 }
 
+.kpi-row-6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+
 @media (max-width: 900px) {
   .search-grid {
     grid-template-columns: 1fr;
@@ -781,8 +791,17 @@ table.data input[type="date"] {
   .kpi-row {
     grid-template-columns: repeat(2, 1fr);
   }
+  .kpi-row-6 {
+    grid-template-columns: repeat(3, 1fr);
+  }
   .grid-2 {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .kpi-row-6 {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -999,62 +1018,3 @@ table.data input[type="date"] {
   font-size: 12px;
 }
 
-/* ---------- 사이드바 안의 옆 탭 (실적요약 / 영업현황 / 앱가입현황 / ...) ---------- */
-/* "파이낸셜" 사이드 메뉴 아래에 세로로 붙는 리포트 탭. 배치도의 상단 가로 탭바 대신
-   사이드바 쪽에 배치해 달라는 요청에 맞춰 옆 탭 형태로 바꿨다. */
-.nav-group {
-  display: flex;
-  flex-direction: column;
-}
-.nav-subtabs {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 2px 0 6px 14px;
-  margin: 0 0 2px 12px;
-  border-left: 1px solid var(--sidebar-border);
-}
-.nav-subtab {
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--sidebar-ink-faint);
-  background: none;
-  border: none;
-  padding: 7px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-  white-space: nowrap;
-}
-.nav-subtab:hover {
-  color: var(--sidebar-ink);
-}
-.nav-subtab.active {
-  background: var(--sidebar-bg-active);
-  color: var(--sidebar-ink-active);
-}
-.nav-subtab .soon {
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--sidebar-ink-faint);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--sidebar-border);
-  padding: 1px 5px;
-  border-radius: 4px;
-  margin-left: 5px;
-  vertical-align: 1px;
-}
-
-@media (max-width: 860px) {
-  .nav-group {
-    flex-direction: column;
-  }
-  .nav-subtabs {
-    flex-direction: row;
-    flex-wrap: wrap;
-    border-left: none;
-    padding: 4px 0 0;
-    margin: 0;
-  }
-}

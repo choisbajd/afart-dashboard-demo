@@ -354,6 +354,7 @@ table.data thead th {
   color: var(--ink-muted);
   background: var(--surface-2);
   padding: 10px 14px;
+  height: 34px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
@@ -736,36 +737,41 @@ table.data input[type="date"] {
 }
 
 /* ---------- scrollable table (cap + scroll) ---------- */
-.table-scroll {
-  max-height: 520px;
+/* 헤더가 1행이든(rowSpan 없이) 2행(그룹 헤더, 예: 원수보험료 아래 전체/신규/갱신)이든 모두
+   맞도록 첫 번째 행은 top:0, "첫 행 바로 다음 행"(2행짜리 헤더에서만 존재)은 첫 행 높이(34px)
+   만큼 내려서 고정한다. 예전엔 두 행 모두 top:0이라 겹쳐 보이는 버그가 있었다. */
+.table-scroll,
+.table-scroll-sm,
+.table-scroll-6 {
   overflow-y: auto;
 }
-.table-scroll thead th {
+.table-scroll thead tr:first-child th,
+.table-scroll-sm thead tr:first-child th,
+.table-scroll-6 thead tr:first-child th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+}
+.table-scroll thead tr:first-child + tr th,
+.table-scroll-sm thead tr:first-child + tr th,
+.table-scroll-6 thead tr:first-child + tr th {
+  position: sticky;
+  top: 34px;
+  z-index: 2;
+}
+
+.table-scroll {
+  max-height: 520px;
 }
 
 /* 10건 넘는 짧은 리스트용 (하루 갱신 건 등) — 대략 10행 높이에서 스크롤 시작 */
 .table-scroll-sm {
   max-height: 420px;
-  overflow-y: auto;
-}
-.table-scroll-sm thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
 }
 
 /* 기간별 실적 표 — 일/주/월 어느 탭이든 항상 6행 높이로 고정, 그 이상은 스크롤 */
 .table-scroll-6 {
   max-height: 258px;
-  overflow-y: auto;
-}
-.table-scroll-6 thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
 }
 
 @media (max-width: 900px) {

@@ -10,7 +10,7 @@ import {
   aggregateMembers,
   REVENUE_RATE,
 } from "../lib/aggregate";
-import { formatWon, formatCompactWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
+import { formatWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
 import { GROUPS } from "../lib/groups";
 import FilterBar from "../components/FilterBar";
 import Sidebar from "../components/Sidebar";
@@ -69,7 +69,6 @@ const MAIN_TABS = [
   { key: "sales", label: "② 영업현황(원수보험료)" },
   { key: "members", label: "③ 앱가입현황" },
   { key: "manager", label: "④ 매니저 실적", soon: true },
-  { key: "search", label: "⑤ 상세검색", soon: true },
 ];
 
 export default function Home({ packedRows, callRows, managers, bounds }) {
@@ -254,15 +253,39 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
               </div>
             </div>
             <div className="kpi-card">
-              <div className="label">원수보험료</div>
-              <div className="value" style={{ fontSize: 19 }}>
-                {formatCompactWon(t.premiumSum)}
+              <div className="label">원수보험료 (전체)</div>
+              <div className="value" style={{ fontSize: 17 }}>
+                {formatWon(t.premiumSum)}
               </div>
             </div>
             <div className="kpi-card">
-              <div className="label">매출액</div>
-              <div className="value" style={{ fontSize: 19 }}>
-                {formatCompactWon(t.revenue)}
+              <div className="label">원수보험료 (신규)</div>
+              <div className="value" style={{ fontSize: 17 }}>
+                {formatWon(t.premiumSumNew)}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">원수보험료 (갱신)</div>
+              <div className="value" style={{ fontSize: 17 }}>
+                {formatWon(t.premiumSumRenewal)}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">매출액 (전체)</div>
+              <div className="value" style={{ fontSize: 17 }}>
+                {formatWon(t.revenue)}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">매출액 (신규)</div>
+              <div className="value" style={{ fontSize: 17 }}>
+                {formatWon(t.revenueNew)}
+              </div>
+            </div>
+            <div className="kpi-card">
+              <div className="label">매출액 (갱신)</div>
+              <div className="value" style={{ fontSize: 17 }}>
+                {formatWon(t.revenueRenewal)}
               </div>
             </div>
           </div>
@@ -271,20 +294,29 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             <table className="data">
               <thead>
                 <tr>
-                  <th>월</th>
-                  <th>접수</th>
-                  <th>신규계약</th>
-                  <th>갱신계약</th>
-                  <th>계약(합계)</th>
-                  <th>전환율</th>
-                  <th>원수보험료</th>
-                  <th>매출액</th>
+                  <th rowSpan={2}>월</th>
+                  <th rowSpan={2}>접수</th>
+                  <th colSpan={3}>계약</th>
+                  <th rowSpan={2}>전환율</th>
+                  <th colSpan={3}>원수보험료</th>
+                  <th colSpan={3}>매출액</th>
+                </tr>
+                <tr>
+                  <th>신규</th>
+                  <th>갱신</th>
+                  <th>합계</th>
+                  <th>전체</th>
+                  <th>신규</th>
+                  <th>갱신</th>
+                  <th>전체</th>
+                  <th>신규</th>
+                  <th>갱신</th>
                 </tr>
               </thead>
               <tbody>
                 {contractSummary.months.length === 0 && (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                    <td colSpan={12} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
                       선택한 기간에 데이터가 없습니다.
                     </td>
                   </tr>
@@ -297,8 +329,12 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
                     <td>{formatCount(m.dealsRenewal)}</td>
                     <td>{formatCount(m.dealsTotal)}</td>
                     <td>{formatPercent(m.conversionRate)}</td>
-                    <td>{formatCompactWon(m.premiumSum)}</td>
-                    <td>{formatCompactWon(m.revenue)}</td>
+                    <td>{formatWon(m.premiumSum)}</td>
+                    <td>{formatWon(m.premiumSumNew)}</td>
+                    <td>{formatWon(m.premiumSumRenewal)}</td>
+                    <td>{formatWon(m.revenue)}</td>
+                    <td>{formatWon(m.revenueNew)}</td>
+                    <td>{formatWon(m.revenueRenewal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -310,8 +346,12 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
                   <td>{formatCount(t.dealsRenewal)}</td>
                   <td>{formatCount(t.dealsTotal)}</td>
                   <td>{formatPercent(t.conversionRate)}</td>
-                  <td>{formatCompactWon(t.premiumSum)}</td>
-                  <td>{formatCompactWon(t.revenue)}</td>
+                  <td>{formatWon(t.premiumSum)}</td>
+                  <td>{formatWon(t.premiumSumNew)}</td>
+                  <td>{formatWon(t.premiumSumRenewal)}</td>
+                  <td>{formatWon(t.revenue)}</td>
+                  <td>{formatWon(t.revenueNew)}</td>
+                  <td>{formatWon(t.revenueRenewal)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -416,6 +456,21 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
               <ChannelStackedChart channels={dealChart.channels} data={dealChart.data} />
             </div>
           </div>
+
+          <div className="group" style={{ marginTop: 28 }}>
+            <div className="section-head">
+              <h2>실적 제외 리스트</h2>
+            </div>
+            <div className="card" style={{ padding: "20px 20px", color: "var(--ink-muted)" }}>
+              <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                신규 가입보험사와 기존 가입보험사가 같은(자기전환) 건을 실적에서 빼서 여기 별도로 보여줄 예정입니다.
+              </p>
+              <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-faint)" }}>
+                지금 Snowflake 조회 쿼리에는 "기존 가입보험사" 값이 없어서 아직 판정을 못 합니다 — 이 필드를 조회에 추가하면 바로
+                채우겠습니다.
+              </p>
+            </div>
+          </div>
         </section>
         )}
 
@@ -474,18 +529,23 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
             <table className="data">
               <thead>
                 <tr>
-                  <th>순위</th>
-                  <th>딜러명</th>
-                  <th>영업채널</th>
-                  <th>체결 매니저</th>
-                  <th>체결건수</th>
-                  <th>원수보험료</th>
+                  <th rowSpan={2}>순위</th>
+                  <th rowSpan={2}>딜러명</th>
+                  <th rowSpan={2}>영업채널</th>
+                  <th rowSpan={2}>체결 매니저</th>
+                  <th rowSpan={2}>체결건수</th>
+                  <th colSpan={3}>원수보험료</th>
+                </tr>
+                <tr>
+                  <th>전체</th>
+                  <th>신규</th>
+                  <th>갱신</th>
                 </tr>
               </thead>
               <tbody>
                 {members.dealers.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                    <td colSpan={8} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
                       해당 조건에 회원이 없습니다.
                     </td>
                   </tr>
@@ -500,6 +560,8 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
                     <td>{d.managerName}</td>
                     <td>{formatCount(d.count)}</td>
                     <td style={{ fontWeight: 600 }}>{formatWon(d.premiumSum)}</td>
+                    <td>{formatWon(d.premiumSumNew)}</td>
+                    <td>{formatWon(d.premiumSumRenewal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -517,20 +579,6 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
           <div className="card" style={{ textAlign: "center", padding: "48px 20px", color: "var(--ink-muted)" }}>
             <p style={{ margin: 0, fontSize: 14 }}>
               매니저별 일/주/월 실적 집계, 이번달 예상 인센티브, 본인 담당 G1~G5 회원수·보험사별 원수보험료를 준비 중입니다.
-            </p>
-          </div>
-        </section>
-        )}
-
-        {/* ============ 5. 상세검색 (준비중) ============ */}
-        {activeTab === "search" && (
-        <section className="section">
-          <div className="section-head">
-            <h2>상세검색</h2>
-          </div>
-          <div className="card" style={{ textAlign: "center", padding: "48px 20px", color: "var(--ink-muted)" }}>
-            <p style={{ margin: 0, fontSize: 14 }}>
-              주민번호 앞자리+이름, 휴대폰번호+이름, 차량번호/차대번호로 고객을 찾는 검색 기능을 준비 중입니다.
             </p>
           </div>
         </section>

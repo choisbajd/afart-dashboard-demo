@@ -1,12 +1,9 @@
 import { signOut } from "next-auth/react";
 
-// 참고 화면(보험사업부 사이드바)과 동일한 메뉴 구성. 지금은 "파이낸셜"(이 대시보드)만 실제로
-// 만들어져 있어서 나머지는 비활성 표시만 해둔다 — 각 사업부 대시보드가 생기면 href를 연결한다.
+// 지금은 "파이낸셜"(이 대시보드)만 실제로 만들어져 있어서 "상담사"는 비활성 표시만 해둔다.
+// 전체(구글 시트 기준)·파트너스·인슈어런스는 필요 없어 제거했다.
 const NAV_ITEMS = [
-  { key: "all", label: "전체", sub: "구글 시트 기준", active: false },
   { key: "financial", label: "파이낸셜", sub: "자동차보험", active: true },
-  { key: "partners", label: "파트너스", sub: "장기보험", active: false },
-  { key: "insurance", label: "인슈어런스", sub: "GA", active: false },
   { key: "counselor", label: "상담사", sub: "콜·계약 월별", active: false },
 ];
 

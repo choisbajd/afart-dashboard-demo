@@ -8,6 +8,8 @@ import {
   aggregateContractSummary,
   aggregateDailyByChannel,
   aggregateMembers,
+  aggregateByManager,
+  aggregateInsurerPivot,
   REVENUE_RATE,
 } from "../lib/aggregate";
 import { formatWon, formatCount, formatPercent, formatDateLabel } from "../lib/format";
@@ -51,6 +53,14 @@ function daysAgoDate(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
+// "YYYY-MM-DD"가 속한 주(월요일)의 날짜를 돌려준다.
+function startOfWeek(dateStr) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+  d.setUTCDate(d.getUTCDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
 const INFLOW_PRESETS = [
   { key: "7", label: "최근 7일" },
   { key: "14", label: "최근 14일" },
@@ -68,7 +78,7 @@ const MAIN_TABS = [
   { key: "summary", label: "① 실적 요약" },
   { key: "sales", label: "② 영업현황(원수보험료)" },
   { key: "members", label: "③ 앱가입현황" },
-  { key: "manager", label: "④ 매니저 실적", soon: true },
+  { key: "manager", label: "④ 매니저 실적" },
 ];
 
 export default function Home({ packedRows, callRows, managers, bounds }) {
@@ -141,6 +151,28 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
     [rows, dateFrom, dateTo, memberChannel]
   );
   const groupLabel = (code) => GROUPS.find((g) => g.code === code)?.label || code;
+
+  // ── [4] 매니저 실적 ────────────────────────────────────────────
+  const [managerPeriod, setManagerPeriod] = useState("daily");
+  const managerPeriodRange = useMemo(() => {
+    const today = bounds.max;
+    if (managerPeriod === "monthly") return { from: `${today.slice(0, 7)}-01`, to: today };
+    if (managerPeriod === "weekly") return { from: startOfWeek(today), to: today };
+    return { from: today, to: today };
+  }, [managerPeriod, bounds.max]);
+  const managerSummary = useMemo(
+    () => aggregateByManager(rows, callRows, { dateFrom: managerPeriodRange.from, dateTo: managerPeriodRange.to }),
+    [rows, callRows, managerPeriodRange]
+  );
+  // 상단 필터바의 "매니저" 선택 = 본인 기준. 전체(ALL)일 땐 개인화 위젯을 숨긴다.
+  const myMembers = useMemo(
+    () => aggregateMembers(rows, { dateFrom, dateTo, manager }),
+    [rows, dateFrom, dateTo, manager]
+  );
+  const myInsurerPivot = useMemo(
+    () => aggregateInsurerPivot(rows, { dateFrom, dateTo, manager }),
+    [rows, dateFrom, dateTo, manager]
+  );
 
   return (
     <>
@@ -556,16 +588,162 @@ export default function Home({ packedRows, callRows, managers, bounds }) {
         </section>
         )}
 
-        {/* ============ 4. 매니저 실적 (준비중) ============ */}
+        {/* ============ 4. 매니저 실적 ============ */}
         {activeTab === "manager" && (
         <section className="section">
           <div className="section-head">
-            <h2>매니저 실적</h2>
+            <h2>기간별 매니저 실적</h2>
           </div>
-          <div className="card" style={{ textAlign: "center", padding: "48px 20px", color: "var(--ink-muted)" }}>
-            <p style={{ margin: 0, fontSize: 14 }}>
-              매니저별 일/주/월 실적 집계, 이번달 예상 인센티브, 본인 담당 G1~G5 회원수·보험사별 원수보험료를 준비 중입니다.
-            </p>
+          <p className="section-note">
+            접수는 <b>상담 생성일</b>, 계약·원수보험료는 <b>체결(매출인식)일</b> 기준입니다. 일간=오늘, 주간=이번주(월~오늘),
+            월간=이번달(1일~오늘) 데이터입니다.
+          </p>
+
+          <div className="pill-block">
+            <div className="pill-group">
+              {GRANULARITY_TABS.map((g) => (
+                <button
+                  key={g.key}
+                  type="button"
+                  className={`pill ${managerPeriod === g.key ? "active" : ""}`}
+                  onClick={() => setManagerPeriod(g.key)}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="table-wrap table-scroll">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th rowSpan={2}>매니저</th>
+                  <th rowSpan={2}>접수</th>
+                  <th colSpan={3}>계약</th>
+                  <th rowSpan={2}>전환율</th>
+                  <th colSpan={3}>원수보험료</th>
+                </tr>
+                <tr>
+                  <th>신규</th>
+                  <th>갱신</th>
+                  <th>합계</th>
+                  <th>전체</th>
+                  <th>신규</th>
+                  <th>갱신</th>
+                </tr>
+              </thead>
+              <tbody>
+                {managerSummary.managers.length === 0 && (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                      해당 기간에 데이터가 없습니다.
+                    </td>
+                  </tr>
+                )}
+                {managerSummary.managers.map((m) => (
+                  <tr key={m.managerName}>
+                    <td style={{ textAlign: "left" }}>{m.managerName}</td>
+                    <td>{formatCount(m.received)}</td>
+                    <td>{formatCount(m.dealsNew)}</td>
+                    <td>{formatCount(m.dealsRenewal)}</td>
+                    <td>{formatCount(m.dealsTotal)}</td>
+                    <td>{formatPercent(m.conversionRate)}</td>
+                    <td style={{ fontWeight: 600 }}>{formatWon(m.premiumSum)}</td>
+                    <td>{formatWon(m.premiumSumNew)}</td>
+                    <td>{formatWon(m.premiumSumRenewal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="group" style={{ marginTop: 28 }}>
+            <div className="section-head">
+              <h2>이번달 예상 인센티브</h2>
+            </div>
+            <div className="card" style={{ padding: "20px 20px", color: "var(--ink-muted)" }}>
+              <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-faint)" }}>
+                원수보험료 누적액 구간별 요율(인센티브 정책)이 아직 확정되지 않아 계산식을 넣지 못했습니다 — 요율 구간이
+                정해지면 위 매니저별 원수보험료를 그대로 이용해 바로 계산에 반영하겠습니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="group" style={{ marginTop: 28 }}>
+            <div className="section-head">
+              <h2>본인 담당 현황{manager !== "ALL" ? ` — ${manager}` : ""}</h2>
+            </div>
+            {manager === "ALL" ? (
+              <div className="card" style={{ padding: "20px 20px", color: "var(--ink-muted)" }}>
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  상단 필터바에서 매니저를 선택하면 본인 담당 그룹별 배정 회원수·보험사별 체결 원수보험료를 보여줍니다.
+                </p>
+              </div>
+            ) : (
+              <div className="grid-2">
+                <div className="card">
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>G1~G5 그룹별 배정 회원수</div>
+                  <table className="data" style={{ minWidth: 0 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left" }}>그룹</th>
+                        <th>배정 회원수</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {myMembers.byGroup.length === 0 && (
+                        <tr>
+                          <td colSpan={2} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                            해당 기간에 배정 회원이 없습니다.
+                          </td>
+                        </tr>
+                      )}
+                      {myMembers.byGroup.map((g) => (
+                        <tr key={g.group}>
+                          <td style={{ textAlign: "left" }}>{groupLabel(g.group)}</td>
+                          <td>{formatCount(g.dealerCount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="card">
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+                    체결 보험사 × 가입유형별 원수보험료
+                  </div>
+                  <table className="data" style={{ minWidth: 0 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left" }}>보험사</th>
+                        {myInsurerPivot.types.map((t) => (
+                          <th key={t}>{t}</th>
+                        ))}
+                        <th>합계</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {myInsurerPivot.rows.length === 0 && (
+                        <tr>
+                          <td colSpan={myInsurerPivot.types.length + 2} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                            해당 기간에 체결 건이 없습니다.
+                          </td>
+                        </tr>
+                      )}
+                      {myInsurerPivot.rows.map((r) => (
+                        <tr key={r.insurer}>
+                          <td style={{ textAlign: "left" }}>{r.insurer}</td>
+                          {myInsurerPivot.types.map((t) => (
+                            <td key={t}>{formatWon(r.byType[t])}</td>
+                          ))}
+                          <td style={{ fontWeight: 600 }}>{formatWon(r.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </section>
         )}

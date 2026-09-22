@@ -93,7 +93,6 @@ masked AS (
     u.business_sub_type,
     u.business_card_status,
     u.manager_id                                                       AS dealer_manager_id,
-    u.sales_channel_id,
     u.join_at                                                          AS dealer_join_at
   FROM AJDCAR_PROD.PUBLIC.COUNSEL_APPLICATION ca
   JOIN AJDCAR_PROD.PUBLIC.COUNSEL_VEHICLE cv ON cv.counsel_id = ca.counsel_id AND cv.is_deleted = FALSE

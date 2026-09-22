@@ -13,6 +13,7 @@ import {
   aggregateInsurerPivot,
   aggregateGroupBreakdown,
   aggregateDealerActivity,
+  listJoinCohortContracts,
   REVENUE_RATE,
 } from "../lib/aggregate";
 import {
@@ -99,6 +100,17 @@ const MAIN_TABS = [
 function monthEndDate(month) {
   const [y, m] = month.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+// latestMonth("YYYY-MM")로부터 거슬러 올라간 최근 n개월 목록(최신이 먼저).
+function recentMonths(latestMonth, n) {
+  const [y, m] = latestMonth.split("-").map(Number);
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
 }
 
 export default function Home({ packedRows, packedDbRows, managers, bounds }) {
@@ -251,6 +263,16 @@ export default function Home({ packedRows, packedDbRows, managers, bounds }) {
   const dealerActivity = useMemo(
     () => aggregateDealerActivity(rows, { asOfDate: bounds.max, dateFrom, dateTo }),
     [rows, bounds.max, dateFrom, dateTo]
+  );
+
+  // "OO월 가입 회원 중 OO월 계약 체결" 교차 조회 — 최근 12개월 중 고를 수 있게 하고,
+  // 기본값은 최신 데이터 기준 지난달(가입)→이번달(계약)로 잡는다.
+  const monthOptions = useMemo(() => recentMonths(bounds.max.slice(0, 7), 12), [bounds.max]);
+  const [cohortJoinMonth, setCohortJoinMonth] = useState(monthOptions[1] || monthOptions[0]);
+  const [cohortContractMonth, setCohortContractMonth] = useState(monthOptions[0]);
+  const cohortContracts = useMemo(
+    () => listJoinCohortContracts(rows, { joinMonth: cohortJoinMonth, contractMonth: cohortContractMonth, manager }),
+    [rows, cohortJoinMonth, cohortContractMonth, manager]
   );
 
   return (
@@ -1204,6 +1226,83 @@ export default function Home({ packedRows, packedDbRows, managers, bounds }) {
                       <td>{formatCount(c.within6mo)}</td>
                       <td>{c.confirmedActiveRate == null ? "관찰중" : formatPercent(c.confirmedActiveRate)}</td>
                       <td>{c.avgContractsPerDealer.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="group">
+            <div className="section-head">
+              <h2>가입월 × 계약월 교차 조회</h2>
+            </div>
+            <p className="section-note">
+              선택한 달에 가입한 회원 중, 선택한 달에 계약(가입완료 또는 지급대기) 체결이 있는 건을 보여줍니다. "본인계약여부"는
+              상단 필터바에서 매니저를 선택했을 때만 채워집니다(전체 보기에서는 비교 대상이 없어 "-"로 표시).
+            </p>
+            <div className="pill-block">
+              <span className="pill-block-label">가입월</span>
+              <select
+                value={cohortJoinMonth}
+                onChange={(e) => setCohortJoinMonth(e.target.value)}
+                style={{ fontFamily: "inherit", fontSize: 13, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6 }}
+              >
+                {monthOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {formatDateLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <span className="pill-block-label">계약월</span>
+              <select
+                value={cohortContractMonth}
+                onChange={(e) => setCohortContractMonth(e.target.value)}
+                style={{ fontFamily: "inherit", fontSize: 13, padding: "7px 10px", border: "1px solid var(--border)", borderRadius: 6 }}
+              >
+                {monthOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {formatDateLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+                {formatDateLabel(cohortJoinMonth)} 가입자 {formatCount(cohortContracts.joinedDealerCount)} 중{" "}
+                {formatCount(cohortContracts.dealerCount)}명 계약
+              </span>
+            </div>
+            <div className="table-wrap table-scroll">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left" }}>회원(딜러)명</th>
+                    <th>가입일</th>
+                    <th>계약일</th>
+                    <th style={{ textAlign: "left" }}>채널</th>
+                    <th>구분</th>
+                    <th>원수보험료</th>
+                    <th style={{ textAlign: "left" }}>체결매니저</th>
+                    <th>본인계약여부</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cohortContracts.list.length === 0 && (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: "center", color: "var(--ink-faint)" }}>
+                        해당 조건에 맞는 계약이 없습니다.
+                      </td>
+                    </tr>
+                  )}
+                  {cohortContracts.list.map((r, i) => (
+                    <tr key={`${r.dealerKey}-${r.contractDate}-${i}`}>
+                      <td style={{ textAlign: "left" }}>{r.dealerName}</td>
+                      <td>{r.joinDate}</td>
+                      <td>{r.contractDate}</td>
+                      <td style={{ textAlign: "left" }}>{r.channel}</td>
+                      <td>{r.consultType}</td>
+                      <td>{formatWon(r.premium)}</td>
+                      <td style={{ textAlign: "left" }}>{r.managerName}</td>
+                      <td>{r.isSelfManager == null ? "-" : r.isSelfManager ? "본인" : "타인"}</td>
                     </tr>
                   ))}
                 </tbody>
